@@ -1,0 +1,18 @@
+---
+Error error
+string display_name
+string model_name
+string device_firmware_version
+string device_id
+string device_user_id
+string device_serial_number
+string interface_id
+string transport_layer_id
+bool streaming
+uint32 width
+uint32 height
+float64 frame_rate
+string pixel_format
+TriggerInfo[] trigger_info
+string ip_address
+string mac_address

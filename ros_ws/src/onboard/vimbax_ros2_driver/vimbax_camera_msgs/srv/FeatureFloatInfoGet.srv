@@ -1,0 +1,8 @@
+string feature_name
+FeatureModule feature_module
+---
+float64 min
+float64 max
+float64 inc
+bool inc_available
+Error error
