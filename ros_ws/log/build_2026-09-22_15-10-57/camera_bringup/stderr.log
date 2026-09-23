@@ -1,2 +1,0 @@
-/usr/lib/python3.10/distutils/dist.py:274: UserWarning: Unknown distribution option: 'maintainer_address'
-  warnings.warn(msg)
