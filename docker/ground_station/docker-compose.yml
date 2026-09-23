@@ -1,0 +1,9 @@
+services:
+  humble:
+    build: .
+    network_mode: host
+    privileged: true
+    volumes:
+      - ./src:/humble_ws/src
+    stdin_open: true
+    tty: true
