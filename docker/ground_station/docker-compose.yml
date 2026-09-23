@@ -1,9 +1,13 @@
 services:
-  humble:
-    build: .
-    network_mode: host
-    privileged: true
+  ground_station:
+    build:
+      context: ../..
+      dockerfile: docker/ground_station/Dockerfile
+    network_mode: host   # required for DDS multicast discovery to work
+    environment:
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - ROS_DOMAIN_ID=0  # must match sealbot and any telemetry bridge
     volumes:
-      - ./src:/humble_ws/src
+      - ../../src/ground_station:/ws/src:rw
     stdin_open: true
     tty: true
