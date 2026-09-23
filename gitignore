@@ -1,0 +1,32 @@
+# Git Ignore for System Setup:
+# --- ROS / Colcon / Catkin Build & Log Artifacts ---
+build/
+install/
+log/
+.build_cache/
+devel/
+
+# --- Docker & Environment Files ---
+.env
+.env.*
+!.env.example
+*.local
+docker-compose.override.yml
+
+# --- Application & System Logs ---
+*.log
+logs/
+*.swp
+*.bak
+
+# --- Python & System Files (Common in ROS nodes) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.tox/
+.venv
+venv/
+ENV/
+.DS_Store
