@@ -1,0 +1,21 @@
+[1.205s] Invoking command in '/home/sealbot/Sealbot_ROS/ros_ws/src/camera_bringup': PYTHONPATH=/home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/camera_bringup build --build-base /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build install --record /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/install.log --single-version-externally-managed install_data
+[1.666s] running egg_info
+[1.667s] writing ../../build/camera_bringup/camera_bringup.egg-info/PKG-INFO
+[1.668s] writing dependency_links to ../../build/camera_bringup/camera_bringup.egg-info/dependency_links.txt
+[1.668s] writing entry points to ../../build/camera_bringup/camera_bringup.egg-info/entry_points.txt
+[1.669s] writing requirements to ../../build/camera_bringup/camera_bringup.egg-info/requires.txt
+[1.669s] writing top-level names to ../../build/camera_bringup/camera_bringup.egg-info/top_level.txt
+[1.672s] reading manifest file '../../build/camera_bringup/camera_bringup.egg-info/SOURCES.txt'
+[1.674s] writing manifest file '../../build/camera_bringup/camera_bringup.egg-info/SOURCES.txt'
+[1.674s] running build
+[1.674s] running build_py
+[1.675s] running install
+[1.675s] running install_lib
+[1.678s] running install_data
+[1.678s] copying launch/sealbot_camera.launch.xml -> /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/camera_bringup/launch
+[1.678s] running install_egg_info
+[1.682s] removing '/home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup-0.0.0-py3.10.egg-info' (and everything under it)
+[1.682s] Copying ../../build/camera_bringup/camera_bringup.egg-info to /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup-0.0.0-py3.10.egg-info
+[1.684s] running install_scripts
+[1.726s] writing list of installed files to '/home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/install.log'
+[1.793s] Invoked command in '/home/sealbot/Sealbot_ROS/ros_ws/src/camera_bringup' returned '0': PYTHONPATH=/home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/camera_bringup build --build-base /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build install --record /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/install.log --single-version-externally-managed install_data

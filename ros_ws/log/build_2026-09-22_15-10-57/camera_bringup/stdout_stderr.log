@@ -1,0 +1,35 @@
+/usr/lib/python3.10/distutils/dist.py:274: UserWarning: Unknown distribution option: 'maintainer_address'
+  warnings.warn(msg)
+running egg_info
+creating ../../build/camera_bringup/camera_bringup.egg-info
+writing ../../build/camera_bringup/camera_bringup.egg-info/PKG-INFO
+writing dependency_links to ../../build/camera_bringup/camera_bringup.egg-info/dependency_links.txt
+writing entry points to ../../build/camera_bringup/camera_bringup.egg-info/entry_points.txt
+writing requirements to ../../build/camera_bringup/camera_bringup.egg-info/requires.txt
+writing top-level names to ../../build/camera_bringup/camera_bringup.egg-info/top_level.txt
+writing manifest file '../../build/camera_bringup/camera_bringup.egg-info/SOURCES.txt'
+reading manifest file '../../build/camera_bringup/camera_bringup.egg-info/SOURCES.txt'
+writing manifest file '../../build/camera_bringup/camera_bringup.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build
+creating /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build/lib
+creating /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build/lib/camera_bringup
+copying camera_bringup/__init__.py -> /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build/lib/camera_bringup
+running install
+running install_lib
+creating /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup
+copying /home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/build/lib/camera_bringup/__init__.py -> /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup
+byte-compiling /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup/__init__.py to __init__.cpython-310.pyc
+running install_data
+creating /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/ament_index
+creating /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/ament_index/resource_index
+creating /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/ament_index/resource_index/packages
+copying resource/camera_bringup -> /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/ament_index/resource_index/packages
+copying package.xml -> /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/camera_bringup
+creating /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/camera_bringup/launch
+copying launch/sealbot_camera.launch.xml -> /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/share/camera_bringup/launch
+running install_egg_info
+Copying ../../build/camera_bringup/camera_bringup.egg-info to /home/sealbot/Sealbot_ROS/ros_ws/install/camera_bringup/lib/python3.10/site-packages/camera_bringup-0.0.0-py3.10.egg-info
+running install_scripts
+writing list of installed files to '/home/sealbot/Sealbot_ROS/ros_ws/build/camera_bringup/install.log'
