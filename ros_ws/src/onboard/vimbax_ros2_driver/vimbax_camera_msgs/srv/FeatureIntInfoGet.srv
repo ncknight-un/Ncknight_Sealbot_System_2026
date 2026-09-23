@@ -1,0 +1,7 @@
+string feature_name
+FeatureModule feature_module
+---
+int64 min
+int64 max
+int64 inc
+Error error

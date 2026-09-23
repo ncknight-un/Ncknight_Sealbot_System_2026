@@ -1,0 +1,7 @@
+<launch>
+  <node pkg="vimbax_camera" exec="vimbax_camera_node" name="sealbot_camera" namespace="camera" output="screen">
+    <param name="camera_id" value="DEV_1AB22C0B5BB3" />
+    <param name="frame_id" value="camera_optical_frame" />
+    <param name="settings_file" value="$(find-pkg-share camera_bringup)/config/sealbot_camera_settings.xml" />
+  </node>
+</launch>
