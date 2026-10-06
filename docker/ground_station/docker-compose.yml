@@ -6,8 +6,13 @@ services:
     network_mode: host   # required for DDS multicast discovery to work
     environment:
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-      - ROS_DOMAIN_ID=0  # must match sealbot and any telemetry bridge
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID}
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - CYCLONEDDS_URI=<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="enx00e08a366906"/></Interfaces></General><Discovery><Peers><Peer Address="192.168.2.3"/></Peers></Discovery></Domain></CycloneDDS>
     volumes:
-      - ../../src/ground_station:/ws/src:rw
+      - ../../ros_ws:/ros_ws:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ~/.Xauthority:/root/.Xauthority:ro
     stdin_open: true
     tty: true

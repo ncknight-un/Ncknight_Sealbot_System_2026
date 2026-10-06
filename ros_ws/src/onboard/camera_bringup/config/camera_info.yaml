@@ -1,0 +1,27 @@
+image_width: 1944
+image_height: 1472
+camera_name: alvium_1800_u291m
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1743.1059, 0.0, 947.8133,
+         0.0, 1739.0345, 754.5626,
+         0.0, 0.0, 1.0]
+distortion_model: rational_polynomial
+distortion_coefficients:
+  rows: 1
+  cols: 8
+  data: [-0.33481843, 0.41378694, -0.01577008, 0.00603618,
+         -1.23943947, -0.00989968, -0.03985478, 0.03563671]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0,
+         0.0, 1.0, 0.0,
+         0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1743.1059, 0.0, 947.8133, 0.0,
+         0.0, 1739.0345, 754.5626, 0.0,
+         0.0, 0.0, 1.0, 0.0]
