@@ -1,0 +1,23 @@
+<launch>
+  <arg name="start_camera" default="true" />
+
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"
+           if="$(var start_camera)" />
+
+  <node_container pkg="rclcpp_components" exec="component_container"
+                  name="apriltag_container" output="screen">
+
+    <composable_node pkg="image_proc" plugin="image_proc::RectifyNode" name="rectify">
+      <remap from="image" to="/camera/image_raw" />
+      <remap from="camera_info" to="/camera/camera_info" />
+      <remap from="image_rect" to="/camera/image_rect" />
+    </composable_node>
+
+    <composable_node pkg="apriltag_ros" plugin="AprilTagNode" name="apriltag">
+      <remap from="image_rect" to="/camera/image_rect" />
+      <remap from="camera_info" to="/camera/camera_info" />
+      <param from="$(find-pkg-share apriltag_bringup)/config/tags.yaml" />
+    </composable_node>
+
+  </node_container>
+</launch>
