@@ -14,8 +14,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # XML LAUNCH FILES:
         (os.path.join('share', package_name, 'launch'), glob('launch/*.xml')),
-        # XML CONFIG FILES:
-        (os.path.join('share', package_name, 'config'), glob('config/*.xml')),
+        # XML and YAML CONFIG FILES:
+        (os.path.join('share', package_name, 'config'), glob('config/*.xml') + glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -380,7 +380,7 @@
             <Feature Name="ExposureAutoMax" Value="9000000" Type="Float" />
             <Feature Name="ExposureAutoMin" Value="14.768" Type="Float" />
             <Feature Name="ExposureMode" Value="Timed" Type="Enum" />
-            <Feature Name="ExposureTime" Value="8501.879" Type="Float" />
+            <Feature Name="ExposureTime" Value="1200.879" Type="Float" />
             <Feature Name="FileProcessStatus" Value="None" Type="Enum" />
             <SelectorGroup Name="FileSelector" Type="Enum" Value="Firmware">
                 <SelectorGroup Name="FileOperationSelector" Type="Enum" Value="Open">
@@ -985,7 +985,7 @@
             <Feature Name="GainAutoMax" Value="48" Type="Float" />
             <Feature Name="GainAutoMin" Value="0" Type="Float" />
             <SelectorGroup Name="GainSelector" Type="Enum" Value="All">
-                <Feature Name="Gain" Value="15" Type="Float" />
+                <Feature Name="Gain" Value="18" Type="Float" />
             </SelectorGroup>
             <Feature Name="GainSelector" Value="All" Type="Enum" />
             <Feature Name="Height" Value="1472" Type="Int" />

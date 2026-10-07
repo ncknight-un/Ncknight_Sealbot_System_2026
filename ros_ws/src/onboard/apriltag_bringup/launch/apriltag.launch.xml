@@ -5,7 +5,7 @@
            if="$(var start_camera)" />
 
   <node_container pkg="rclcpp_components" exec="component_container"
-                  name="apriltag_container" output="screen">
+                  name="apriltag_container" namespace="/" output="screen">
 
     <composable_node pkg="image_proc" plugin="image_proc::RectifyNode" name="rectify">
       <remap from="image" to="/camera/image_raw" />
