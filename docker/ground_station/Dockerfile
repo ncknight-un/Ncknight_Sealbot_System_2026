@@ -12,14 +12,6 @@ RUN apt-get update && apt-get install -y \
     && add-apt-repository -y universe \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Mrcal tools for camera calibration setup on Station PC:
-Run apt-get update && apt-get install -y \
-    mrcal \
-    libmrcal-dev \
-    python3-mrcal \
-    mrgingham \ 
-    && rm -rf /var/lib/apt/lists/*
-
 # Pull and build MAVLINK and MAVROSin an isolated directory: 
 WORKDIR /opt/ros_deps
 RUN mkdir -p src 
@@ -38,6 +30,21 @@ RUN apt-get update && \
 
 # Buikd dependency packages into /opt/ros_deps/install
 RUN . /opt/ros/humble/setup.sh && colcon build --packages-up-to mavros --install-base /opt/ros_deps/install 
+
+# Install AprilTag detection and camera dependencies
+RUN apt-get update && apt-get install -y \
+    ros-humble-apriltag-ros \
+    ros-humble-apriltag-msgs \
+    ros-humble-camera-info-manager \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Mrcal tools for camera calibration setup on Station PC:
+Run apt-get update && apt-get install -y \
+    mrcal \
+    libmrcal-dev \
+    python3-mrcal \
+    mrgingham \ 
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the Runtime Directory: 
 # RUN mkdir -p /tmp/runtime-root && chmod 0700 /tmp/runtime-root

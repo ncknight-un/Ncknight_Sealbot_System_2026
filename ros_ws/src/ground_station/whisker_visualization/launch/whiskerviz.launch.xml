@@ -1,0 +1,16 @@
+<launch>
+  <arg name="detections_topic" default="/detections"/>
+  <arg name="diameter" default="0.10"/>
+  <arg name="height" default="0.10"/>
+  <arg name="lifetime" default="0.3"/>
+  <arg name="frame_prefix" default=""/>
+
+  <node pkg="whisker_visualization" exec="tag_viz_node" name="tag_viz_node" output="screen">
+    <param name="detections_topic" value="$(var detections_topic)"/>
+    <param name="diameter" value="$(var diameter)"/>
+    <param name="height" value="$(var height)"/>
+    <param name="lifetime" value="$(var lifetime)"/>
+    <param name="frame_prefix" value="$(var frame_prefix)" type="str"/>
+    <param name="color" value="0.1,0.6,1.0,0.9" value-sep=","/>
+  </node>
+</launch>
