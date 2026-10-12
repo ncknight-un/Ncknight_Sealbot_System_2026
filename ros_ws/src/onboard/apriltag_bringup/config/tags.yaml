@@ -7,7 +7,7 @@
     pose_estimation_method: pnp
     detector:
       threads: 2
-      decimate: 1.0
+      decimate: 1.5
       blur: 0.0
       refine: true
       sharpening: 0.25

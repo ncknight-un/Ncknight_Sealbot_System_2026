@@ -4,7 +4,7 @@
   <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"
            if="$(var start_camera)" />
 
-  <node_container pkg="rclcpp_components" exec="component_container"
+  <node_container pkg="rclcpp_components" exec="component_container_mt"
                   name="apriltag_container" namespace="/" output="screen">
 
     <composable_node pkg="image_proc" plugin="image_proc::RectifyNode" name="rectify">
