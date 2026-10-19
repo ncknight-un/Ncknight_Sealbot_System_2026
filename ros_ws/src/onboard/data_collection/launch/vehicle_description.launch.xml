@@ -1,0 +1,7 @@
+<launch>
+  <arg name="urdf_file" default="$(find-pkg-share data_collection)/urdf/bluerov2_sensors.urdf"/>
+
+  <node pkg="robot_state_publisher" exec="robot_state_publisher" name="robot_state_publisher" output="screen">
+    <param name="robot_description" value="$(command 'cat $(var urdf_file)')" type="str"/>
+  </node>
+</launch>

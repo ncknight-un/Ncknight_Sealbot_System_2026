@@ -1,0 +1,18 @@
+<launch>
+  <arg name="use_camera" default="true"/>
+  <arg name="use_sonar" default="true"/>
+  <arg name="start_mavros" default="true"/>
+  <arg name="fcu_url" default="udp://0.0.0.0:14550@"/>
+
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_camera)"/>
+
+  <node pkg="ping360_sonar" exec="ping360_node" name="ping360_node" output="screen" if="$(var use_sonar)">
+    <param name="frame" value="sonar"/>
+  </node>
+
+  <!-- MAVROS and bluerov_sensor_node start together; start_mavros:=false skips both -->
+  <include file="$(find-pkg-share bluerov_sensors)/launch/bluerov_sensors.launch.py" if="$(var start_mavros)">
+    <arg name="start_mavros" value="true"/>
+    <arg name="fcu_url" value="$(var fcu_url)"/>
+  </include>
+</launch>

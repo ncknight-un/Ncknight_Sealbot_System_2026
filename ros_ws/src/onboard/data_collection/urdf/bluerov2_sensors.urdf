@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<!--
+  Minimal BlueROV2 frame tree for data collection (TF only, no dynamics).
+
+  base_link and the Ping360 mount come from the bluerov2_ping SDF
+  (bluerov2_gz, models/bluerov2_ping): ping_link at (-0.18, 0, -0.095) in base_link.
+  That is a SIMULATION placeholder; replace with your measured Ping360 mount.
+
+  camera_link comes from the old bluerov URDF (unverified).
+  Frames: x forward, y left, z up (base_link / camera_link / sonar).
+-->
+<robot name="bluerov2">
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.06"/>
+      <geometry><box size="0.457 0.338 0.2"/></geometry>
+      <material name="blue"><color rgba="0.1 0.3 0.8 0.6"/></material>
+    </visual>
+  </link>
+
+  <!-- Ping360: frame name must match the ping360_node "frame" parameter ("sonar") -->
+  <link name="sonar">
+    <visual>
+      <geometry><cylinder length="0.035" radius="0.024"/></geometry>
+      <material name="green"><color rgba="0.1 0.8 0.2 1"/></material>
+    </visual>
+  </link>
+  <joint name="sonar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sonar"/>
+    <origin xyz="-0.18 0 -0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- UNVERIFIED: this is the ONBOARD camera mount, not the data-collection camera system. Replace.
+       Camera mount taken from the commented-out base_link_to_camera_link joint in the old bluerov URDF.
+       TODO: confirm it is still correct and that it is relative to the same base_link origin. -->
+  <link name="camera_link"/>
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="-0.112 0 0.230" rpy="0 -0.05 0"/>
+  </joint>
+
+  <!-- Optical frame (z forward, x right, y down); matches camera_frame_id in sealbot_camera.launch.xml -->
+  <link name="camera_optical_frame"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+  </joint>
+
+</robot>

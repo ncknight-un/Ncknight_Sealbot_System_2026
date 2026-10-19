@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>data_collection</name>
+  <version>0.1.0</version>
+  <description>Top-level launch and vehicle description for BlueROV2 data collection</description>
+  <maintainer email="nolanknight133@icloud.com">sealbot</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>camera_bringup</exec_depend>
+  <exec_depend>apriltag_bringup</exec_depend>
+  <exec_depend>bluerov_sensors</exec_depend>
+  <exec_depend>ping360_sonar</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
