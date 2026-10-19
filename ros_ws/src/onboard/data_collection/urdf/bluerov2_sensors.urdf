@@ -13,9 +13,10 @@
 
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0.06"/>
-      <geometry><box size="0.457 0.338 0.2"/></geometry>
-      <material name="blue"><color rgba="0.1 0.3 0.8 0.6"/></material>
+      <!-- Mesh and scale from bluerov2_gz (models/bluerov2/meshes/bluerov2.dae) -->
+      <geometry>
+        <mesh filename="package://data_collection/meshes/bluerov2.dae" scale="0.025 0.025 0.025"/>
+      </geometry>
     </visual>
   </link>
 
