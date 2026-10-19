@@ -1,0 +1,5 @@
+rosbags>=0.10
+numpy
+opencv-python
+pyqtgraph>=0.13
+PySide6

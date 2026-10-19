@@ -1,59 +1,45 @@
-FROM ros:humble
+# syntax=docker/dockerfile:1
+# Base image already includes ros-humble-desktop (saves a large download/install)
+FROM osrf/ros:humble-desktop
 
-# Install Pre-req tools & ROS dependencies
-RUN apt-get update && apt-get install -y \
-    software-properties-common \ 
-    curl \
-    python3-vcstool \
-    python3-rosinstall-generator \
-    python3-osrf-pycommon \
-    ros-humble-desktop \
-    ros-humble-rmw-cyclonedds-cpp \
-    && add-apt-repository -y universe \
-    && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-c"]
 
-# Pull and build MAVLINK and MAVROSin an isolated directory: 
-WORKDIR /opt/ros_deps
-RUN mkdir -p src 
+# Keep downloaded .deb files between builds (used with the cache mounts below)
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
-RUN rosinstall_generator --format repos mavlink | tee /tmp/mavlink.repos && \
-    rosinstall_generator --format repos --upstream mavros | tee /tmp/mavros.repos && \
-    vcs import src < /tmp/mavlink.repos && \
-    vcs import src < /tmp/mavros.repos
+# All apt packages in one layer.
+# MAVROS comes as a prebuilt binary instead of being compiled from source.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
+      python3-pip \
+      ros-humble-rmw-fastrtps-cpp \
+      ros-humble-rmw-cyclonedds-cpp \
+      ros-humble-rosbag2-storage-mcap \
+      ros-humble-mavros \
+      ros-humble-mavros-extras \
+      ros-humble-apriltag-ros \
+      ros-humble-apriltag-msgs \
+      ros-humble-camera-info-manager \
+      ros-humble-image-proc \
+      mrcal \
+      libmrcal-dev \
+      python3-mrcal \
+      mrgingham
 
-# Install underlying dependencies and GeographicLib datasets
-RUN apt-get update && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -y --rosdistro humble && \
-    bash ./src/mavros/mavros/scripts/install_geographiclib_datasets.sh \
-    && rm -rf /var/lib/apt/lists/*
+# GeographicLib datasets required by MAVROS
+RUN /opt/ros/humble/lib/mavros/install_geographiclib_datasets.sh
 
-# Buikd dependency packages into /opt/ros_deps/install
-RUN . /opt/ros/humble/setup.sh && colcon build --packages-up-to mavros --install-base /opt/ros_deps/install 
+# Ping360 sonar driver needs the Blue Robotics Python library
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install bluerobotics-ping
 
-# Install AprilTag detection and camera dependencies
-RUN apt-get update && apt-get install -y \
-    ros-humble-apriltag-ros \
-    ros-humble-apriltag-msgs \
-    ros-humble-camera-info-manager \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Mrcal tools for camera calibration setup on Station PC:
-Run apt-get update && apt-get install -y \
-    mrcal \
-    libmrcal-dev \
-    python3-mrcal \
-    mrgingham \ 
-    && rm -rf /var/lib/apt/lists/*
-
-# Set the Runtime Directory: 
-# RUN mkdir -p /tmp/runtime-root && chmod 0700 /tmp/runtime-root
-# ENV XDG_RUNTIME_DIR=/tmp/runtime-root
-
-# Create the workspace directory structure
 WORKDIR /ros_ws
 
-# Configure environment automatic sourcing and workspace shortcuts
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
-RUN echo "source /opt/ros_deps/install/setup.bash" >> /root/.bashrc
-RUN echo "alias humble-source='source /ros_ws/install/setup.bash'" >> /root/.bashrc
+# Automatic sourcing and workspace shortcut
+RUN cat >> /root/.bashrc <<'EOF'
+source /opt/ros/humble/setup.bash
+alias humble-source='source /ros_ws/install/setup.bash'
+EOF

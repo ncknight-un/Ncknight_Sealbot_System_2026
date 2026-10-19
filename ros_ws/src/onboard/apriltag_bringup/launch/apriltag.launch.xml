@@ -1,9 +1,4 @@
 <launch>
-  <arg name="start_camera" default="true" />
-
-  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"
-           if="$(var start_camera)" />
-
   <node_container pkg="rclcpp_components" exec="component_container_mt"
                   name="apriltag_container" namespace="/" output="screen">
 

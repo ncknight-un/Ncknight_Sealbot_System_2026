@@ -3,16 +3,21 @@ services:
     build:
       context: ../..
       dockerfile: docker/ground_station/Dockerfile
-    network_mode: host   # required for DDS multicast discovery to work
+    network_mode: host   # required for DDS discovery
+    ipc: host            # lets Fast DDS shared memory work across the container boundary
     environment:
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - RMW_FASTRTPS_PUBLICATION_MODE=ASYNCHRONOUS
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/fastdds_peers.xml
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID}
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      - CYCLONEDDS_URI=<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="enx00e08a366906"/></Interfaces></General><Discovery><Peers><Peer Address="192.168.2.3"/></Peers></Discovery></Domain></CycloneDDS>
     volumes:
       - ../../ros_ws:/ros_ws:rw
+      - ./fastdds_peers.xml:/fastdds_peers.xml:ro
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ~/.Xauthority:/root/.Xauthority:ro
+      - /media/${USER}:/media/host:ro,rslave   # thumb drive (rosbags)
+      - ../../bags_out:/bags_out:rw            # tagged bags saved on the host
     stdin_open: true
     tty: true

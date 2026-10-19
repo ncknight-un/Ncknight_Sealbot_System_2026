@@ -1,4 +1,3 @@
-
 # Git Ignore for System Setup:
 # --- ROS / Colcon / Catkin Build & Log Artifacts ---
 build/
@@ -6,6 +5,9 @@ install/
 log/
 .build_cache/
 devel/
+
+# Ignore processed rosbags
+bags_out/
 
 # --- Docker & Environment Files ---
 .env
@@ -31,3 +33,7 @@ __pycache__/
 venv/
 ENV/
 .DS_Store
+
+
+# Don't export any VSCODE files
+*.vscode/
