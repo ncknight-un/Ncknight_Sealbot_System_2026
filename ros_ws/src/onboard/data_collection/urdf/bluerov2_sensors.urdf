@@ -2,11 +2,11 @@
 <!--
   Minimal BlueROV2 frame tree for data collection (TF only, no dynamics).
 
-  base_link and the Ping360 mount come from the bluerov2_ping SDF
-  (bluerov2_gz, models/bluerov2_ping): ping_link at (-0.18, 0, -0.095) in base_link.
-  That is a SIMULATION placeholder; replace with your measured Ping360 mount.
+  base_link is at the center of the mesh (bluerov2_gz, models/bluerov2).
+  The sonar joint was replaced with a hand measurement from the vehicle center:
+  4.5 in forward, 4.5 in right (y = -0.1143), 7 in up.
 
-  camera_link comes from the old bluerov URDF (unverified).
+  camera_link is hand-measured (see below).
   Frames: x forward, y left, z up (base_link / camera_link / sonar).
 -->
 <robot name="bluerov2">
@@ -30,17 +30,16 @@
   <joint name="sonar_joint" type="fixed">
     <parent link="base_link"/>
     <child link="sonar"/>
-    <origin xyz="-0.18 0 -0.095" rpy="0 0 0"/>
+    <origin xyz="0.1143 -0.1143 0.1778" rpy="0 0 0"/>
   </joint>
 
-  <!-- UNVERIFIED: this is the ONBOARD camera mount, not the data-collection camera system. Replace.
-       Camera mount taken from the commented-out base_link_to_camera_link joint in the old bluerov URDF.
-       TODO: confirm it is still correct and that it is relative to the same base_link origin. -->
+  <!-- Camera system: 0.0635 m (2.5 in) forward, centered, 0.1778 m (7 in) below base_link.
+       Hand-measured; orientation assumed to look straight forward (rpy 0). TODO: confirm. -->
   <link name="camera_link"/>
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="-0.112 0 0.230" rpy="0 -0.05 0"/>
+    <origin xyz="0.0635 0 -0.1778" rpy="0 0 0"/>
   </joint>
 
   <!-- Optical frame (z forward, x right, y down); matches camera_frame_id in sealbot_camera.launch.xml -->
