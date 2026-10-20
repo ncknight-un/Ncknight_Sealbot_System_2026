@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 #include "rclcpp/rclcpp.hpp"
 #include "apriltag_msgs/msg/april_tag_detection_array.hpp"
@@ -17,10 +18,9 @@ public:
     marker_topic_     = declare_parameter<std::string>("marker_topic", "tag_cylinders");
     frame_prefix_ = declare_parameter<std::string>("frame_prefix", "tag_");
     diameter_         = declare_parameter<double>("diameter", 0.001);          // m
-    height_           = declare_parameter<double>("height", 0.05);            // m
+    height_           = declare_parameter<double>("height", 0.01);            // m
     lifetime_         = declare_parameter<double>("lifetime", 0.3);           // s
-    color_            = declare_parameter<std::vector<double>>(
-                          "color", {0.2, 0.6, 1.0, 0.9});                     // r g b a
+    color_            = declare_parameter<std::vector<double>>("color", {0.2, 0.6, 1.0, 0.9});  // r g b a
 
     if (color_.size() != 4) {
       RCLCPP_WARN(get_logger(), "'color' must have 4 elements; using default.");
@@ -43,6 +43,11 @@ private:
     const builtin_interfaces::msg::Duration life =
       rclcpp::Duration::from_seconds(lifetime_);
 
+    // Set group tags for length
+    const std::initializer_list<int> group1 = {1,4,7,10,13,16};
+    const std::initializer_list<int> group2 = {2,5,8,11,14,17};
+    const std::initializer_list<int> group3 = {3,6,9,12,15,18};
+
     for (const auto & det : msg->detections) {
       visualization_msgs::msg::Marker m;
       // apriltag_ros publishes tag frames as "<family>:<id>" by default
@@ -53,11 +58,27 @@ private:
       m.type = visualization_msgs::msg::Marker::CYLINDER;
       m.action = visualization_msgs::msg::Marker::ADD;
       m.pose.orientation.w = 1.0;
-      // tag z-axis points out of the tag; lift so the cylinder sits on it
-      m.pose.position.z = -height_ / 2.0;
       m.scale.x = diameter_;
       m.scale.y = diameter_;
-      m.scale.z = height_;
+      // Change height based on tag ID: 
+      if (std::find(group1.begin(), group1.end(), det.id) != group1.end()) {
+        // tag z-axis points out of the tag; lift so the cylinder sits on it
+        m.pose.position.z = -height_ / 2.0;
+        m.scale.z = height_;
+      }
+      else if (std::find(group2.begin(), group2.end(), det.id) != group2.end()) {
+        // tag z-axis points out of the tag; lift so the cylinder sits on it
+        m.pose.position.z = -1.5 * height_ / 2.0;
+        m.scale.z = 1.5 * height_;
+      }
+      else if (std::find(group3.begin(), group3.end(), det.id) != group3.end()) {
+        // tag z-axis points out of the tag; lift so the cylinder sits on it
+        m.pose.position.z = -2 * height_ / 2.0;
+        m.scale.z = 2 * height_;
+      }
+      else {
+        m.scale.z = 0.0001;
+      }
       m.color.r = color_[0];
       m.color.g = color_[1];
       m.color.b = color_[2];

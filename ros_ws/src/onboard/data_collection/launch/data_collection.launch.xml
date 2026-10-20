@@ -5,10 +5,10 @@
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14550@"/>
 
-  <!-- 1. Frames first, so TF is available when sensors start publishing -->
+  <!-- Frames first, so TF is available when sensors start publishing -->
   <include file="$(find-pkg-share data_collection)/launch/vehicle_description.launch.xml"/>
 
-  <!-- 2. Sensors -->
+  <!-- Sensors (Ping360 & Camera)-->
   <include file="$(find-pkg-share data_collection)/launch/sensors.launch.xml">
     <arg name="use_camera" value="$(var use_camera)"/>
     <arg name="use_sonar" value="$(var use_sonar)"/>
@@ -16,8 +16,8 @@
     <arg name="fcu_url" value="$(var fcu_url)"/>
   </include>
 
-  <!-- 3. Perception (rectify + AprilTag). Needs the camera, so skip it if the camera is off. -->
-  <group if="$(eval '&quot;$(var use_apriltag)&quot; == &quot;true&quot; and &quot;$(var use_camera)&quot; == &quot;true&quot;')">
-    <include file="$(find-pkg-share data_collection)/launch/perception.launch.xml"/>
-  </group>
+  <!-- Perception (rectify + AprilTag) -->
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_apriltag)"/>
+  
+  <!--  -->
 </launch>
