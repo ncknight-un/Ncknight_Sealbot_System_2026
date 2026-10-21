@@ -1,7 +1,8 @@
 <launch>
   <arg name="use_camera" default="true"/>
   <arg name="use_sonar" default="true"/>
-  <arg name="use_apriltag" default="true"/>
+  <arg name="use_apriltag" default="false"/>
+  <arg name="use_tag_zero_frames" default="false"/>
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14550@"/>
 
@@ -16,8 +17,10 @@
     <arg name="fcu_url" value="$(var fcu_url)"/>
   </include>
 
-  <!-- Perception (rectify + AprilTag) -->
-  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_apriltag)"/>
-  
-  <!--  -->
+  <!-- Perception (rectify + AprilTag); needs use_camera -->
+  <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml" if="$(var use_apriltag)"/>
+
+  <!-- Panel zero frames (camera_optical_frame -> tag_N_zero) from config/panel_zero.yaml;
+       run panel_calibration.launch.xml and rebuild first -->
+  <include file="$(find-pkg-share data_collection)/launch/tag_zero_frames.launch.xml" if="$(var use_tag_zero_frames)"/>
 </launch>

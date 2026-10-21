@@ -8,6 +8,8 @@
 
   <node pkg="ping360_sonar" exec="ping360_node" name="ping360_node" output="screen" if="$(var use_sonar)">
     <param name="frame" value="sonar"/>
+    <!-- Raw echoes on /scan_echo, recorded to the bag and converted to a point cloud on the ground station -->
+    <param name="publish_echo" value="true"/>
   </node>
 
   <!-- MAVROS and bluerov_sensor_node start together; start_mavros:=false skips both -->

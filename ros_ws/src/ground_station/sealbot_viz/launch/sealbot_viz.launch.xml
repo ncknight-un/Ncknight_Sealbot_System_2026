@@ -1,0 +1,55 @@
+<launch>
+  <!-- Set use_sim_time:=true when playing back a bag with the clock option (ros2 bag play ... clock) -->
+  <arg name="use_sim_time" default="false"/>
+  <arg name="use_rviz" default="true"/>
+  <arg name="rviz_config" default="$(find-pkg-share sealbot_viz)/config/sealbot_viz.rviz"/>
+  <arg name="detections_topic" default="/detections"/>
+  <arg name="diameter" default="0.001"/>
+  <arg name="height" default="0.05"/>
+  <arg name="lifetime" default="0.3"/>
+  <arg name="frame_prefix" default="tag_"/>
+  <arg name="arena_frame" default="world"/>
+  <arg name="echo_topic" default="/scan_echo"/>
+  <arg name="sonar_threshold" default="100"/>
+
+  <!-- Launch Rviz for vizualization of the robot -->
+  <node pkg="rviz2" exec="rviz2" name="rviz2" output="screen" args="-d $(var rviz_config)"
+        if="$(var use_rviz)">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+
+  <node pkg="sealbot_viz" exec="tag_viz_node" name="tag_viz_node" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="detections_topic" value="$(var detections_topic)"/>
+    <param name="diameter" value="$(var diameter)"/>
+    <param name="height" value="$(var height)"/>
+    <param name="lifetime" value="$(var lifetime)"/>
+    <param name="frame_prefix" value="$(var frame_prefix)" type="str"/>
+    <param name="color" value="0.1,0.6,1.0,0.9" value-sep=","/>
+  </node>
+
+  <node pkg="sealbot_viz" exec="arena_viz_node" name="arena_viz_node" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="frame_id" value="$(var arena_frame)" type="str"/>
+    <param name="width" value="22.86"/>
+    <param name="length" value="50.0"/>
+    <param name="wall_depth" value="2.5"/>
+    <param name="wall_thickness" value="0.05"/>
+    <param name="color" value="0.0,0.0,0.6,0.5" value-sep=","/>
+  </node>
+
+  <!-- Raw Ping360 echoes -> PointCloud2 on /sonar_cloud -->
+  <node pkg="sealbot_viz" exec="sonar_cloud_node" name="sonar_cloud_node" output="screen">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+    <param name="echo_topic" value="$(var echo_topic)"/>
+    <param name="intensity_threshold" value="$(var sonar_threshold)"/>
+    <param name="min_range" value="0.3"/>
+  </node>
+
+  <!-- TEMPORARY: identity world -> base_link transform for bring-up/testing.
+       Remove once real localization publishes world -> base_link. -->
+  <node pkg="tf2_ros" exec="static_transform_publisher" name="tmp_world_to_base_link"
+        args="--frame-id $(var arena_frame) --child-frame-id base_link">
+    <param name="use_sim_time" value="$(var use_sim_time)"/>
+  </node>
+</launch>

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>whisker_visualization</name>
+  <name>sealbot_viz</name>
   <version>0.1.0</version>
-  <description>Whisker Vizualization Node for PC Ground Station using Markers</description>
+  <description>Ground station RViz visualization for the Sealbot (whiskers, arena, sonar)</description>
   <maintainer email="nolanknight2026@u.northwestern.edu">root</maintainer>
   <license>Apache-2.0</license>
 
@@ -12,8 +12,12 @@
   <depend>rclcpp</depend>
   <depend>visualization_msgs</depend>
   <depend>apriltag_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>ping360_sonar_msgs</depend>
 
   <exec_depend>apriltag_ros</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

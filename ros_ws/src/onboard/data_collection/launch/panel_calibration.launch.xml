@@ -1,0 +1,25 @@
+<launch>
+  <!-- Zero the panel: run camera + AprilTag detector, average each tag's pose for
+       `duration` seconds and write the zero poses to `output_file`. Keep the panel
+       at rest. The whole launch shuts down once the calibration node exits. -->
+  <arg name="duration" default="5.0"/>
+  <!-- Empty = data_collection/config/panel_zero.yaml in the source tree.
+       Rebuild data_collection afterwards to install it for tag_zero_frames. -->
+  <arg name="output_file" default=""/>
+  <arg name="camera_frame" default="camera_optical_frame"/>
+  <arg name="tag_prefix" default="tag_"/>
+  <arg name="startup_timeout" default="30.0"/>
+
+  <!-- Camera and detector -->
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"/>
+  <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml"/>
+
+  <node pkg="data_collection" exec="panel_calibration" name="panel_calibration" output="screen"
+        on_exit="shutdown">
+    <param name="duration" value="$(var duration)"/>
+    <param name="output_file" value="$(var output_file)"/>
+    <param name="camera_frame" value="$(var camera_frame)"/>
+    <param name="tag_prefix" value="$(var tag_prefix)"/>
+    <param name="startup_timeout" value="$(var startup_timeout)"/>
+  </node>
+</launch>

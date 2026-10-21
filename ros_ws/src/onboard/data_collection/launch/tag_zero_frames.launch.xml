@@ -1,0 +1,9 @@
+<launch>
+  <!-- Publishes camera_optical_frame -> tag_N_zero static frames from the panel
+       calibration. Live tag deviation is then the TF lookup tag_N_zero -> tag_N. -->
+  <arg name="calibration_file" default="$(find-pkg-share data_collection)/config/panel_zero.yaml"/>
+
+  <node pkg="data_collection" exec="tag_zero_frames" name="tag_zero_frames" output="screen">
+    <param from="$(var calibration_file)"/>
+  </node>
+</launch>
