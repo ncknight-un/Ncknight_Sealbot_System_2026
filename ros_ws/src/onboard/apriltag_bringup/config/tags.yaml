@@ -2,8 +2,8 @@
 /**:
   ros__parameters:
     image_transport: raw
-    family: 25h9
-    size: 0.008
+    family: 36h11
+    size: 0.0085
     max_hamming: 0
     pose_estimation_method: pnp
     detector:
