@@ -19,7 +19,8 @@ target_compile_features(panel_calibration PUBLIC cxx_std_17)
 # survives rebuilds and gets installed by the next colcon build
 target_compile_definitions(panel_calibration PRIVATE
   DATA_COLLECTION_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-target_include_directories(panel_calibration PRIVATE ${EIGEN3_INCLUDE_DIRS})
+# Imported target adds Eigen as a system include, so its own warnings are not reported
+target_link_libraries(panel_calibration Eigen3::Eigen)
 ament_target_dependencies(panel_calibration rclcpp tf2_msgs)
 
 add_executable(tag_zero_frames src/tag_zero_frames.cpp)
