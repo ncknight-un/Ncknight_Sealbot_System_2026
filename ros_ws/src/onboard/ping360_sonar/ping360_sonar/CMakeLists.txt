@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.5)
 project(ping360_sonar)
 
-option(COMPILE_CPP ON)
+option(COMPILE_CPP "Build the C++ ping360_node" ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)

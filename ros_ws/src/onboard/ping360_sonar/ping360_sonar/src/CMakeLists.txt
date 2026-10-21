@@ -25,4 +25,6 @@ target_link_libraries(ping-cpp LINK_PUBLIC
     ${CMAKE_THREAD_LIBS_INIT}
 )
 
-target_compile_options(ping-cpp PRIVATE "-Wno-unused-variable -Wno-unused-function -Wno-error")
+target_compile_options(ping-cpp PRIVATE -Wno-unused-variable -Wno-unused-function -Wno-error -Wno-cpp -Wno-pedantic)
+# ping-cpp uses the old global boost::bind placeholders; keep them without the deprecation note
+target_compile_definitions(ping-cpp PUBLIC BOOST_BIND_GLOBAL_PLACEHOLDERS)
