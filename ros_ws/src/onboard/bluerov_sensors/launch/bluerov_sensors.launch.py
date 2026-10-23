@@ -7,14 +7,14 @@ Usage:
     ros2 launch bluerov_sensors bluerov_sensors.launch.py
 
 Override the FCU URL:
-    ros2 launch bluerov_sensors bluerov_sensors.launch.py fcu_url:=udp://0.0.0.0:14550@
+    ros2 launch bluerov_sensors bluerov_sensors.launch.py fcu_url:=udp://0.0.0.0:14551@
 
 Run only the sensor node (MAVROS already running elsewhere):
     ros2 launch bluerov_sensors bluerov_sensors.launch.py start_mavros:=false
 
 Network (standard BlueROV2 tether):
     topside = 192.168.2.1, BlueOS/Pi = 192.168.2.2, Jetson = 192.168.2.3
-    In BlueOS > MAVLink Endpoints, add a UDP Client endpoint to 192.168.2.3:14550.
+    In BlueOS > MAVLink Endpoints, add a UDP Client endpoint to 192.168.2.3:14551.
 """
 
 import os
@@ -34,8 +34,8 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument(
             "fcu_url",
-            default_value="udp://0.0.0.0:14550@",
-            description="MAVROS FCU URL (listen on 14550 for the BlueOS UDP endpoint)"),
+            default_value="udp://0.0.0.0:14551@",
+            description="MAVROS FCU URL (listen on 14551 for the BlueOS UDP endpoint)"),
         DeclareLaunchArgument(
             "gcs_url", default_value="",
             description="Optional GCS forward URL (e.g. QGroundControl)"),
@@ -58,6 +58,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "stream_rate_hz", default_value="10",
             description="MAVLink stream rate requested on connect (0 = don't request)"),
+        DeclareLaunchArgument(
+            "fast_rate_hz", default_value="100.0",
+            description="Rate (Hz) for IMU, heading, depth and pressure messages; 0 = use stream_rate_hz"),
         DeclareLaunchArgument(
             "surface_pressure", default_value="0.0",
             description="Surface reference pressure in Pa (0 = auto-zero at startup)"),
@@ -102,6 +105,8 @@ def generate_launch_description():
                 LaunchConfiguration("water_density"), value_type=float),
             "stream_rate_hz": ParameterValue(
                 LaunchConfiguration("stream_rate_hz"), value_type=int),
+            "fast_rate_hz": ParameterValue(
+                LaunchConfiguration("fast_rate_hz"), value_type=float),
             "surface_pressure": ParameterValue(
                 LaunchConfiguration("surface_pressure"), value_type=float),
             "disable_timesync": ParameterValue(

@@ -16,7 +16,7 @@ Timing:
 
 Published:
   /MAVROS_latency     std_msgs/Float64              (one-way link latency estimate, ms)
-  /bluerov/imu        sensor_msgs/Imu
+  /bluerov/imu        sensor_msgs/Imu               (fast_rate_hz, default 100 Hz)
   /bluerov/attitude   geometry_msgs/Vector3Stamped  (x=roll, y=pitch, z=yaw, degrees, ENU)
   /bluerov/heading    std_msgs/Float64              (compass, degrees, 0 = north)
   /bluerov/pressure   sensor_msgs/FluidPressure
@@ -45,7 +45,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 
 from sensor_msgs.msg import Imu, FluidPressure, BatteryState, NavSatFix
 from mavros_msgs.msg import RCIn, RCOut, State, Altitude
-from mavros_msgs.srv import StreamRate, CommandLong
+from mavros_msgs.srv import StreamRate, CommandLong, MessageInterval
 from std_msgs.msg import Float64
 from geometry_msgs.msg import TwistStamped, Vector3Stamped
 from rcl_interfaces.srv import ListParameters, SetParameters
@@ -70,6 +70,13 @@ PUB_QOS = QoSProfile(
 GRAVITY = 9.80665
 MAV_CMD_REQUEST_MESSAGE = 512
 MAVLINK_MSG_ID_SYSTEM_TIME = 2      # small message; cheap for the autopilot to send
+# Messages requested at fast_rate_hz:
+#   RAW_IMU, ATTITUDE    -> /bluerov/imu, /bluerov/attitude (ATTITUDE: orientation + angular
+#                           velocity, RAW_IMU: linear acceleration)
+#   SCALED_PRESSURE      -> /bluerov/pressure
+#   GLOBAL_POSITION_INT  -> /bluerov/heading (hdg) and /bluerov/depth (relative_alt)
+FAST_MESSAGE_IDS = {"RAW_IMU": 27, "SCALED_PRESSURE": 29, "ATTITUDE": 30,
+                    "GLOBAL_POSITION_INT": 33}
 SURFACE_CAL_SAMPLES = 20            # ~1 s of static_pressure at 20 Hz
 
 
@@ -102,6 +109,7 @@ class BlueROVSensorNode(Node):
         self.declare_parameter("water_density", 997.0)          # 997 fresh, 1025 sea
         self.declare_parameter("surface_pressure", 0.0)         # Pa; 0 = auto-zero at startup
         self.declare_parameter("stream_rate_hz", 10)            # 0 = don't request
+        self.declare_parameter("fast_rate_hz", 100.0)           # IMU/heading/depth/pressure rate; 0 = leave at stream rate
         self.declare_parameter("status_period", 5.0)            # seconds
         self.declare_parameter("disable_timesync", True)        # stamp MAVROS data with Jetson time
         self.declare_parameter("latency_period", 1.0)           # seconds between latency probes; 0 = off
@@ -112,6 +120,7 @@ class BlueROVSensorNode(Node):
         self._rho = float(self.get_parameter("water_density").value)
         self._p0 = float(self.get_parameter("surface_pressure").value)
         self._stream_hz = int(self.get_parameter("stream_rate_hz").value)
+        self._fast_hz = float(self.get_parameter("fast_rate_hz").value)
         self._status_period = float(self.get_parameter("status_period").value)
         self._disable_timesync = bool(self.get_parameter("disable_timesync").value)
         self._latency_period = float(self.get_parameter("latency_period").value)
@@ -162,6 +171,7 @@ class BlueROVSensorNode(Node):
 
         self._stream_cli = self.create_client(StreamRate, f"/{ns}/set_stream_rate")
         self._cmd_cli = self.create_client(CommandLong, f"/{ns}/cmd/command")
+        self._interval_cli = self.create_client(MessageInterval, f"/{ns}/set_message_interval")
 
         self.create_timer(self._status_period, self._report_status)
         if self._latency_period > 0.0:
@@ -243,9 +253,33 @@ class BlueROVSensorNode(Node):
         req.stream_id = 0          # all streams
         req.message_rate = self._stream_hz
         req.on_off = True
-        self._stream_cli.call_async(req)
+        fut = self._stream_cli.call_async(req)
+        # Set fast rates only after the stream request lands, or it would override them.
+        fut.add_done_callback(lambda _: self._request_fast_rates())
         self._streams_requested = True
         self.get_logger().info(f"Requested all MAVLink streams at {self._stream_hz} Hz")
+
+    def _request_fast_rates(self):
+        if self._fast_hz <= 0.0:
+            return
+        if not self._interval_cli.service_is_ready():
+            self.get_logger().warn("set_message_interval service not available; "
+                                   f"IMU/heading/depth/pressure stay at {self._stream_hz} Hz")
+            return
+        for name, msg_id in FAST_MESSAGE_IDS.items():
+            req = MessageInterval.Request(message_id=msg_id, message_rate=self._fast_hz)
+            fut = self._interval_cli.call_async(req)
+            fut.add_done_callback(lambda f, name=name: self._on_fast_rate(name, f))
+
+    def _on_fast_rate(self, name, fut):
+        try:
+            ok = fut.result().success
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            self.get_logger().info(f"Requested {name} at {self._fast_hz:g} Hz")
+        else:
+            self.get_logger().warn(f"Autopilot rejected {name} rate of {self._fast_hz:g} Hz")
 
     # ---------------- Timesync -> Jetson clock ----------------
     def _configure_timesync(self):

@@ -24,7 +24,9 @@ Special handling
   sensor_msgs/Image, CompressedImage -> camera frames (thumbnails, stamps)
   sensor_msgs/CameraInfo             -> intrinsics saved in metadata only
   tf2_msgs/TFMessage                 -> one series per parent->child pair
-  /tf_static                         -> saved in metadata only
+  /tf_static                         -> saved in metadata (one entry per parent->child edge);
+                                        the viewer/exporter turn every edge into a series and
+                                        measure it against /tf (see sync_export.tf_tree_series)
   apriltag_msgs/AprilTagDetectionArray -> a count series + one series per tag id
   quaternion fields (orientation / rotation) get derived roll/pitch/yaw columns
 """
@@ -49,8 +51,8 @@ from rosbags.interfaces import MessageDefinitionFormat
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_idl, get_types_from_msg, get_typestore
 
-CACHE_VERSION = 7
-VERSION = "bagsync v9"
+CACHE_VERSION = 8
+VERSION = "bagsync v11"
 CACHE_DIRNAME = ".bagsync_cache"
 HEADER_SANITY_S = 5.0        # max |receive - header| before falling back to receive time
 MAX_ARRAY_ELEMS = 64         # numeric arrays longer than this are skipped (blobs)
@@ -96,6 +98,26 @@ def short_name(topic: str) -> str:
         if not out or out[-1] != p:
             out.append(p)
     return "/".join(out) or topic
+
+
+def measured_rate_hz(t_ns) -> float:
+    """Frames (or messages) per second, counted: (n - 1) intervals / (last - first stamp).
+    n stamps span n - 1 intervals, so this is the true average rate over the recording,
+    dropped frames included. No median, no interpolation."""
+    t = np.asarray(t_ns)
+    if len(t) < 2 or t[-1] <= t[0]:
+        return 0.0
+    return (len(t) - 1) / ((int(t[-1]) - int(t[0])) / 1e9)
+
+
+def static_tf_edges(meta: dict) -> list[dict]:
+    """/tf_static edges, one per parent->child (the last one published wins), frame ids without
+    a leading '/'."""
+    out: dict = {}
+    for tf in meta.get("tf_static", []):
+        p, c = tf["parent"].strip("/"), tf["child"].strip("/")
+        out[(p, c)] = {**tf, "parent": p, "child": c}
+    return list(out.values())
 
 
 def stamp_ns(stamp) -> int:
@@ -293,9 +315,69 @@ class Series:
 
     @property
     def rate_hz(self) -> float:
-        if len(self.t) < 2:
-            return 0.0
-        return 1e9 / float(np.median(np.diff(self.t)))
+        """Average rate = messages / time: (n - 1) intervals over the span first -> last stamp."""
+        return measured_rate_hz(self.t)
+
+
+# --------------------------------------------------------------------------- #
+# Clocks: header stamps vs the recorder's receive times
+# --------------------------------------------------------------------------- #
+# A bag recorded live has receive ≈ header + a few ms. A bag recorded while PLAYING another bag
+# (e.g. running the AprilTag detector on a replay at 0.25x) keeps the original header stamps
+# but its receive times are the re-recording's, possibly slowed or sped up. Then the header
+# stamps are the real timing and receive times must not be used.
+CLOCK_RATE_TOL = 2e-3        # header and receive clocks run at the same rate within 0.2 %
+CLOCK_SAME_S = 1.0           # two topics share a header clock if they agree within 1 s
+
+
+@dataclass
+class Clock:
+    """recv ≈ recv0 + rate * (hdr - hdr0) + c   (all ns); fitted robustly."""
+    hdr0: int
+    recv0: int
+    rate: float              # receive seconds per header second (4.0 for a 0.25x replay)
+    c: float                 # ns
+    resid_ms: float
+
+    def to_recv(self, hdr):
+        return self.recv0 + self.rate * (np.asarray(hdr, np.int64) - self.hdr0) + self.c
+
+    def to_hdr(self, recv):
+        return np.round(self.hdr0 + ((np.asarray(recv, np.int64) - self.recv0) - self.c) / self.rate).astype(np.int64)
+
+    def is_identity(self) -> bool:
+        off = (self.recv0 + self.c - self.hdr0) / 1e9
+        return abs(self.rate - 1.0) < CLOCK_RATE_TOL and abs(off) < HEADER_SANITY_S
+
+    def same_as(self, other: "Clock", at_hdr: int) -> bool:
+        return (abs(self.rate / other.rate - 1.0) < CLOCK_RATE_TOL
+                and abs(float(self.to_recv(at_hdr) - other.to_recv(at_hdr))) / 1e9 < CLOCK_SAME_S * other.rate)
+
+
+def fit_clock(hdr, recv) -> Clock | None:
+    """Linear map header -> receive, or None if the header stamps are unusable (unset, constant,
+    or not increasing with receive time)."""
+    hdr, recv = np.asarray(hdr, np.int64), np.asarray(recv, np.int64)
+    good = hdr != 0
+    if good.sum() < 3:
+        return None
+    hdr, recv = hdr[good], recv[good]
+    h0, r0 = int(hdr[0]), int(recv[0])
+    x, y = (hdr - h0) / 1e9, (recv - r0) / 1e9
+    if np.ptp(x) <= 0 or np.ptp(y) <= 0:
+        return None
+    a, c = np.polyfit(x, y, 1)
+    res = y - (a * x + c)
+    mad = np.median(np.abs(res - np.median(res))) + 1e-6
+    keep = np.abs(res) < 6 * 1.4826 * mad + 0.05
+    if keep.sum() >= 3:
+        a, c = np.polyfit(x[keep], y[keep], 1)
+        res = y - (a * x + c)
+    if not (0.01 < a < 100) or np.corrcoef(x, y)[0, 1] < 0.99:
+        return None
+    # c is put at the low edge of the residuals (receive can only be late, never early)
+    c_ns = (c + float(np.percentile(res, 5))) * 1e9
+    return Clock(h0, r0, float(a), float(c_ns), float(np.median(np.abs(res)) * 1e3))
 
 
 class _Accum:
@@ -317,7 +399,9 @@ class _Accum:
             self.has_header = True
         self.rows.append(row)
 
-    def finish(self, warnings: list) -> Series | None:
+    def finish(self, warnings: list, ref: "Clock | None" = None) -> Series | None:
+        """ref: the bag's reference header clock when the bag was recorded from a playback
+        (receive times are not real time). None = a normal live recording."""
         if not self.rows:
             return None
         recv = np.asarray(self.recv, dtype=np.int64)
@@ -325,7 +409,17 @@ class _Accum:
         info = dict(self.info)
         source = "receive"
         t = recv
-        if self.has_header:
+        if ref is not None:
+            own = fit_clock(hdr, recv) if self.has_header else None
+            if own is not None and own.same_as(ref, int(np.median(hdr))):
+                source, t = "header", hdr
+            elif own is not None:
+                source, t = "header-converted", ref.to_hdr(own.to_recv(hdr))
+                warnings.append(f"{self.name}: header clock differs from the camera's - converted onto it.")
+            else:
+                source, t = "receive-mapped", ref.to_hdr(recv)
+            info["recv_minus_header_ms_median"] = float(np.median((ref.to_hdr(recv) - t) / 1e6))
+        elif self.has_header:
             off = (recv - hdr) / 1e9
             info["recv_minus_header_ms_median"] = float(np.median(off) * 1e3)
             info["recv_minus_header_ms_p95"] = float(np.percentile(np.abs(off), 95) * 1e3)
@@ -436,6 +530,14 @@ class BagData:
         self.camera_topic: str = meta["camera_topic"]
         self.t0: int = int(self.frame_t[0]) if len(self.frame_t) else int(meta["bag_start_ns"])
         self._tags_per_frame: list | None = None
+        # the camera rate is always counted from the frame stamps (frames / time), also for
+        # caches written by older versions that stored a median-based estimate
+        self.meta.setdefault("frame_info", {})["rate_hz"] = self.fps
+
+    @property
+    def fps(self) -> float:
+        """Camera frame rate = frames / time over the whole recording."""
+        return measured_rate_hz(self.frame_t)
 
     # ---- frames ------------------------------------------------------------
     @property
@@ -511,6 +613,23 @@ class BagData:
             if offs and sum(len(o) for o in offs):
                 self.tag_stamp_offset_ms = float(np.median(np.concatenate(offs)) / 1e6)
         return self._tags_per_frame[i] if 0 <= i < self.n_frames else []
+
+    def tags_held(self, i: int, hold: int = 0) -> list[tuple[int, np.ndarray, int]]:
+        """[(tag_id, corners, age)] for frame i. age 0 = detected in this frame. A tag the
+        detector missed for a few frames keeps its last outline for up to `hold` frames
+        (age = frames since it was last seen), so the overlay doesn't blink on every miss."""
+        out = [(k, c, 0) for k, c in self.tags_in_frame(i)]
+        if hold <= 0:
+            return out
+        seen = {k for k, _, _ in out}
+        for age in range(1, hold + 1):
+            if i - age < 0:
+                break
+            for k, c in self.tags_in_frame(i - age):
+                if k not in seen:
+                    seen.add(k)
+                    out.append((k, c, age))
+        return out
 
     # ---- full-resolution frames straight from the bag ------------------------
     def iter_full_frames(self, i0: int, i1: int, msg_dir: str | None = None) -> Iterator[tuple[int, int, np.ndarray]]:
@@ -768,9 +887,34 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
     if progress:
         progress(0.98, "Building arrays")
 
+    # Reference clock. Camera header stamps if usable, otherwise the headered topic with most
+    # messages. If it is not "receive ≈ header" the bag was recorded from a playback: use the
+    # header stamps everywhere and map receive-only topics onto them.
+    ref = fit_clock(frame_hdr, frame_recv) if frame_hdr else None
+    ref_from = camera_topic
+    if ref is None:
+        cands = sorted((a for a in accums.values() if a.has_header and len(a.hdr) > 10),
+                       key=lambda a: -len(a.hdr))
+        for a in cands:
+            ref = fit_clock(a.hdr, a.recv)
+            if ref is not None:
+                ref_from = a.name
+                break
+    playback = ref is not None and not ref.is_identity()
+    clock_info = {"reference": ref_from, "playback_recording": bool(playback)}
+    if ref is not None:
+        clock_info.update({"receive_per_header_s": round(ref.rate, 5),
+                           "offset_s": round((ref.recv0 + ref.c - ref.hdr0) / 1e9, 3)})
+    if playback:
+        warnings.append(
+            f"This bag was recorded from a playback: receive time runs {ref.rate:.3f}x header time "
+            f"(about {1 / ref.rate:.2f}x playback speed), offset {clock_info['offset_s']:.0f} s. "
+            "Using the original header stamps for all topics; topics without a header are mapped onto "
+            f"that clock (reference: {ref_from}).")
+
     series: dict[str, Series] = {}
     for k, a in accums.items():
-        s = a.finish(warnings)
+        s = a.finish(warnings, ref if playback else None)
         if s is not None and s.cols:
             series[k] = s
 
@@ -779,12 +923,12 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
     # next to global_position/rel_alt and compass_hdg, all from the same MAVLink message), shift
     # the headerless one back by that sibling's median receive-minus-header delay.
     for s_ in series.values():
-        if s_.time_source != "receive" or s_.info.get("kind") != "topic":
+        if s_.time_source not in ("receive", "receive-mapped") or s_.info.get("kind") != "topic":
             continue
         parent = s_.name.rsplit("/", 1)[0]
         if parent.count("/") < 2:          # need a real shared namespace, not the root
             continue
-        sib = [o for o in series.values() if o is not s_ and o.time_source == "header"
+        sib = [o for o in series.values() if o is not s_ and o.time_source in ("header", "header-converted")
                and o.name.rsplit("/", 1)[0] == parent and "recv_minus_header_ms_median" in o.info]
         if not sib:
             continue
@@ -804,7 +948,16 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
         frame_info["time_source"] = "header"
         frame_info["recv_minus_header_ms_median"] = float(np.median(off) * 1e3)
         t = hdr
-        if np.all(hdr == 0) or abs(np.median(off)) > HEADER_SANITY_S:
+        if playback and ref_from == camera_topic:
+            frame_info["recv_minus_header_ms_median"] = float(np.median((ref.to_hdr(recv) - hdr) / 1e6))
+        elif playback:
+            own = fit_clock(hdr, recv)
+            if own is not None and own.same_as(ref, int(np.median(hdr))):
+                pass
+            else:
+                frame_info["time_source"] = "receive-mapped"
+                t = ref.to_hdr(recv)
+        elif np.all(hdr == 0) or abs(np.median(off)) > HEADER_SANITY_S:
             warnings.append(f"{camera_topic}: header.stamp unusable - frames use receive time.")
             frame_info["time_source"] = "receive"
             t = recv
@@ -821,7 +974,7 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
         if len(dt):
             med = float(np.median(dt))
             drops = int(np.sum(np.round(dt / med) - 1).clip(0)) if med > 0 else 0
-            frame_info.update({"count": int(len(frames["t"])), "rate_hz": 1 / med if med else 0,
+            frame_info.update({"count": int(len(frames["t"])), "rate_hz": measured_rate_hz(frames["t"]),
                                "dropped_estimate": drops,
                                "max_gap_ms": float(dt.max() * 1e3)})
             if drops:
@@ -836,6 +989,7 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
         "camera_topic": camera_topic,
         "frame_info": frame_info,
         "camera_info": camera_info,
+        "clock": clock_info,
         "tf_static": tf_static,
         "skipped": skipped,
         "warnings": warnings,
@@ -872,6 +1026,64 @@ def _load_cache(bag_dir: Path, meta: dict, data_p: Path, thumbs_p: Path) -> BagD
     return BagData(bag_dir, meta, series, frames, thumbs_p)
 
 
+# --------------------------------------------------------------------------- #
+# Field status: empty / constant fields, and autopilot estimates (vs sensor readings)
+# --------------------------------------------------------------------------- #
+# (topic short-name regex, column regex, note). These are values the autopilot COMPUTES (its
+# EKF/attitude estimate), not direct sensor readings. Edit to suit your setup.
+AUTOPILOT_ESTIMATES = [
+    (r"imu/data$", r"^orientation\.", "autopilot attitude estimate (EKF), not a sensor reading"),
+    (r"global_position/local$", r".", "autopilot position/velocity estimate (EKF; no GPS/DVL on board)"),
+    (r"global_position/global$", r".", "autopilot global position estimate (EKF)"),
+    (r"global_position/compass_hdg$", r".", "autopilot heading estimate (EKF, from the compass)"),
+    (r"global_position/rel_alt$", r".", "autopilot depth estimate (EKF, mostly the depth sensor)"),
+    (r"local_position/", r".", "autopilot local position estimate (EKF)"),
+    (r"vfr_hud$", r".", "autopilot summary values"),
+    (r"^derived/heading$", r".", "calculated from the autopilot's attitude estimate"),
+]
+
+
+def autopilot_note(topic_short: str, col: str) -> str:
+    import re
+    for tp, cp, note in AUTOPILOT_ESTIMATES:
+        if re.search(tp, topic_short) and re.search(cp, col):
+            return note
+    return ""
+
+
+def field_status(s: "Series", col: str) -> tuple[str, str]:
+    """('empty' | 'constant' | '', detail) for a recorded field. Calculated series are skipped."""
+    if s.msgtype == "derived" or s.info.get("kind") == "tf_static":
+        return "", ""
+    v = s.cols[col]
+    if v.dtype.kind in "US":
+        vals = set(v.tolist())
+        if vals <= {""}:
+            return "empty", "no data (always blank)"
+        return ("constant", f"always '{next(iter(vals))}'") if len(vals) == 1 else ("", "")
+    fin = v[np.isfinite(v)]
+    if len(fin) == 0:
+        return "empty", "no data (always blank)"
+    # mavros fills orientation with (0, 0, 0, 1) when the message carries none (e.g. imu/data_raw)
+    import re
+    m = re.match(r"(.*orientation)\.", col)
+    if m and all(f"{m.group(1)}.{a}" in s.cols for a in "xyzw"):
+        q = np.stack([s.cols[f"{m.group(1)}.{a}"] for a in "xyzw"], 1)
+        qf = q[np.isfinite(q).all(1)]
+        if len(qf) and np.all(qf[:, :3] == 0):
+            return "empty", "no orientation in this message (placeholder 0, 0, 0, 1)"
+    if np.all(fin == 0):
+        # 0 is "no data" for measurements and PWM outputs (0 = output unused), but a real value for
+        # counts, error tallies (hamming) and true/false flags
+        kind = s.kinds.get(col, "float")
+        if kind == "float" or re.fullmatch(r"channels\[\d+\]", col):
+            return "empty", "no data (always 0)"
+        return "constant", "always 0"
+    if np.ptp(fin) == 0:
+        return "constant", f"always {fin[0]:g}"
+    return "", ""
+
+
 def bag_summary(data: BagData) -> str:
     """Human-readable overview of what was read and how it is timed."""
     m = data.meta
@@ -880,11 +1092,18 @@ def bag_summary(data: BagData) -> str:
     fi = m.get("frame_info", {})
     if data.camera_topic:
         lines.append(
-            f"Sync camera: {data.camera_topic}  {fi.get('count', 0)} frames @ {fi.get('rate_hz', 0):.2f} Hz, "
+            f"Sync camera: {data.camera_topic}  {data.n_frames} frames @ {data.fps:.3f} fps (frames / time), "
             f"{fi.get('width')}x{fi.get('height')} {fi.get('encoding')}, stamps from {fi.get('time_source')}, "
             f"~{fi.get('dropped_estimate', 0)} dropped, max gap {fi.get('max_gap_ms', 0):.0f} ms, "
             f"latency {fi.get('recv_minus_header_ms_median', float('nan')):.1f} ms"
         )
+    ck = m.get("clock") or {}
+    if ck.get("playback_recording"):
+        lines.append(f"Clock: recorded from a playback at ~{1 / ck['receive_per_header_s']:.2f}x speed "
+                     f"(receive runs {ck['receive_per_header_s']:.3f}x header time). All timing uses the "
+                     f"original header stamps; reference {ck.get('reference')}.")
+    elif ck:
+        lines.append(f"Clock: live recording (header ≈ receive), reference {ck.get('reference')}.")
     lines.append("")
     lines.append(f"{'series':58s} {'n':>6s} {'Hz':>7s}  time    latency(ms)")
     for s in sorted(data.series.values(), key=lambda s: s.name):
@@ -893,6 +1112,27 @@ def bag_summary(data: BagData) -> str:
         lc = s.info.get("latency_corrected_ms")
         extra = f"   (shifted -{lc:.1f} ms, delay of {short_name(s.info['latency_from'][0])})" if lc is not None else ""
         lines.append(f"{s.name[:58]:58s} {len(s.t):6d} {s.rate_hz:7.1f}  {s.time_source:7s} {lat_s}{extra}")
+    empty, const, auto = [], [], {}
+    for s in sorted(data.series.values(), key=lambda s: s.name):
+        for c in s.cols:
+            st, _ = field_status(s, c)
+            if st == "empty":
+                empty.append(f"{s.short}.{c}")
+            elif st == "constant":
+                const.append(f"{s.short}.{c}")
+            note = autopilot_note(s.short, c)
+            if note:
+                auto.setdefault(f"{s.short}  ({note})", 0)
+                auto[f"{s.short}  ({note})"] += 1
+    if empty:
+        lines.append(f"\nEmpty fields (no data, shown in red): {len(empty)}")
+        lines += [f"  {e}" for e in empty]
+    if const:
+        lines.append(f"\nConstant fields (never change, shown in grey): {len(const)}")
+        lines += [f"  {e}" for e in const]
+    if auto:
+        lines.append("\nAutopilot estimates, not sensor readings (shown in orange):")
+        lines += [f"  {k}: {n} fields" for k, n in auto.items()]
     if m.get("skipped"):
         lines.append("\nSkipped:")
         lines += [f"  {k}: {v}" for k, v in m["skipped"].items()]

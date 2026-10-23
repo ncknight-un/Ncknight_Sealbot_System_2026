@@ -2,7 +2,7 @@
   <arg name="use_camera" default="true"/>
   <arg name="use_sonar" default="true"/>
   <arg name="start_mavros" default="true"/>
-  <arg name="fcu_url" default="udp://0.0.0.0:14550@"/>
+  <arg name="fcu_url" default="udp://0.0.0.0:14551@"/>
 
   <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_camera)"/>
 
