@@ -258,13 +258,13 @@
             <Feature Name="DeviceTLVersionMajor" Value="1" Type="Int" />
             <Feature Name="DeviceTLVersionMinor" Value="1" Type="Int" />
             <SelectorGroup Name="DeviceTemperatureSelector" Type="Enum" Value="Sensor">
-                <Feature Name="DeviceTemperature" Value="81.2" Type="Float" />
+                <Feature Name="DeviceTemperature" Value="68.4" Type="Float" />
             </SelectorGroup>
             <SelectorGroup Name="DeviceTemperatureSelector" Type="Enum" Value="Mainboard">
-                <Feature Name="DeviceTemperature" Value="78.5" Type="Float" />
+                <Feature Name="DeviceTemperature" Value="65.5" Type="Float" />
             </SelectorGroup>
             <Feature Name="DeviceTemperatureSelector" Value="Mainboard" Type="Enum" />
-            <Feature Name="DeviceTemperatureStatus" Value="Warning" Type="Enum" />
+            <Feature Name="DeviceTemperatureStatus" Value="OK" Type="Enum" />
             <Feature Name="DeviceUserID" Value="" Type="String" />
             <Feature Name="DeviceVendorName" Value="Allied Vision" Type="String" />
             <Feature Name="DeviceVersion" Value="17222" Type="String" />
@@ -990,7 +990,7 @@
                 <Feature Name="Gain" Value="15" Type="Float" />
             </SelectorGroup>
             <Feature Name="GainSelector" Value="All" Type="Enum" />
-            <Feature Name="Height" Value="1050" Type="Int" />
+            <Feature Name="Height" Value="1076" Type="Int" />
             <Feature Name="HeightMax" Value="1472" Type="Int" />
             <Feature Name="IntensityAutoPrecedence" Value="MinimizeNoise" Type="Enum" />
             <Feature Name="IntensityControllerRate" Value="100" Type="Int" />
@@ -5614,7 +5614,7 @@
             <Feature Name="MultipleRegionEnable" Value="0" Type="Bool" />
             <Feature Name="OffsetX" Value="224" Type="Int" />
             <Feature Name="OffsetY" Value="232" Type="Int" />
-            <Feature Name="PayloadSize" Value="1402800" Type="Int" />
+            <Feature Name="PayloadSize" Value="1437536" Type="Int" />
             <Feature Name="PixelFormat" Value="Mono8" Type="Enum" />
             <Feature Name="PixelSize" Value="Bpp8" Type="Enum" />
             <Feature Name="ReverseX" Value="0" Type="Bool" />
