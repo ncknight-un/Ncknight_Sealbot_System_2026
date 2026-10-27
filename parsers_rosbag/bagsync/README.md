@@ -32,7 +32,7 @@ Pass the bag **folder** (the one holding `metadata.yaml` and `surfaceLine1_tagge
    - drag the blue band or its edges,
    - type start/stop times,
    - move the yellow cursor to a frame and press `[` (start) or `]` (stop).
-3. Choose whether to export **all fields** or **ticked fields only**.
+3. Choose whether to export **all fields**, **ticked fields only**, or **tag_to_imu_format** (see below).
 4. Click **Export CSV**. Optionally also save that window's full-resolution frames as PNG files.
 
 **Keys:**
@@ -238,6 +238,40 @@ A cell is left **empty** rather than invented when:
 | `/camera/camera_info` | n/a | not columns; shown under **Bag info** |
 
 Covariance arrays are left out. Add `--include-covariance` to include them.
+
+### tag_to_imu_format
+
+The third choice in the export dropdown (or `--format tag_to_imu_format` on the command line) writes a compact CSV with a fixed column order, one row per camera frame in the window:
+
+| Columns | Meaning |
+|---|---|
+| `dt_s` | Seconds since the previous camera frame in the bag (a dropped frame shows as about 2× the usual value; blank only for the bag's very first frame) |
+| `derived/tf[tag_N_zero->tag_N].translation_mm.x/y/z`, `.rotation.x/y/z/w` | Each live tag's deviation from its zero frame (see **TF tree**): mm along the zero frame's axes, and a quaternion that is (0, 0, 0, 1) on the zero pose. Sorted by tag number. Tags without a zero frame are left out and listed in the status bar. Blank when the tag wasn't detected in that frame |
+| `…imu/data.linear_acceleration.x/y/z`, `.angular_velocity.x/y/z`, `.orientation.x/y/z/w` | The IMU, interpolated to the frame time (orientation by SLERP) |
+| `bluerov/depth.data` | The depth topic, last. If the bag has no `bluerov/depth`, it falls back to `global_position/rel_alt` and says so |
+
+There are no `timestamp`/`t_s`/`frame_idx` columns. Tick **Save .json notes** to record the first timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
+
+```bash
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format -o run1_tag_imu.csv
+```
+
+### Even IMU timing (topics stamped on arrival)
+
+When MAVROS timesync is off (`timesync_mode = NONE`, as in `bluerov_sensor_node.py`), every MAVROS message is stamped with the Jetson's clock **when it arrives**, not when it was measured. The link delivers readings in bursts, so the stamps bunch up: on sub1 the IMU is exactly 100 Hz overall, but 24 % of its spacings are under 2 ms and 12 % are 20–40 ms pauses. Readings are then matched to the wrong camera frame by up to a few tens of ms, and the pauses show up as blank cells.
+
+Tick **Even IMU timing** (in *Calculations*), or pass `--retime`, to give the IMU (`imu/data`, `bluerov/imu`) and depth (`bluerov/depth`) topics evenly spaced stamps before anything is plotted, integrated or exported:
+
+- The readings keep their order. A straight line `start + n × period` is fitted through the recorded stamps and moved down onto the earliest arrivals, because a reading can arrive late but never early. The new stamps stay on the camera's clock.
+- **Dropped readings** show up as a one-period step in the earliest arrivals; each one found gets an empty slot. If the timing still can't be lined up (many drops, or a clock jump), that topic is left exactly as recorded and the reason is given.
+- What remains is the link's smallest delay (a few ms, the same for every reading). On a simulated bursty recording the timing error went from about 17 ms to about 3–4 ms, most of it that constant delay.
+- **Bag info** lists which clock the camera, IMU and depth stamps are on (`Clocks:`) and what the re-timing did (period, drops found, how far stamps moved). The `.json` notes record it too. The bag itself is never changed; untick the box to go back to the recorded stamps.
+
+```bash
+python sync_export.py BAG --start 4.2 --stop 21.75 --retime --format tag_to_imu_format -o run1.csv
+```
+
+For new recordings, MAVROS timesync (`timesync_mode = MAVLINK`) stamps each message with the autopilot's measurement time, converted to the ROS clock, which removes the bunching at the source.
 
 ### Things to check on the real bag
 

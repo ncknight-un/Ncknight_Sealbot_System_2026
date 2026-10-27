@@ -1083,6 +1083,306 @@ def write_csv(res: SyncResult, path: str | Path, meta: dict | None = None, sidec
     return path
 
 
+# --------------------------------------------------------------------------- #
+# Even re-timing: arrival-stamped topics (MAVROS with timesync off) -> evenly spaced stamps
+# --------------------------------------------------------------------------- #
+RETIME_DEFAULT = ("imu/data", "bluerov/imu", "bluerov/depth")   # series whose name ends with one of these
+RETIME_ENVELOPE_PCT = 1.0      # the new stamps follow the earliest 1 % of arrivals (arrivals are only ever late)
+RETIME_CHUNK_S = 2.0           # length of the pieces checked for dropped messages
+RETIME_MAX_STEP = 0.5          # refuse if the earliest arrivals wander by more than this x the period
+
+
+def retime_check(t_ns: np.ndarray) -> dict:
+    """
+    Fit evenly spaced stamps to a topic stamped on ARRIVAL (bunched by the link):
+        new_k = t_first + offset + k * period         k = 0, 1, 2 ... in arrival order
+    period and offset come from a straight-line fit through all stamps, then the line is moved
+    down to the earliest arrivals (RETIME_ENVELOPE_PCT), since a message can arrive late but
+    never early. That only holds if no message was dropped: one missing message shifts every
+    later index by one period. So the earliest-arrival level is compared piece by piece
+    (RETIME_CHUNK_S); if it wanders by more than RETIME_MAX_STEP x period, 'ok' is False.
+    Returns {'ok', 'reason', 'period_ms', 'rate_hz', 't_new' (if ok), 'shift_ms' stats ...}.
+    """
+    t = np.asarray(t_ns, np.int64)
+    n = len(t)
+    if n < 20:
+        return {"ok": False, "reason": f"only {n} messages"}
+    k = np.arange(n, dtype=float)
+    ts = (t - t[0]) / 1e9
+    dt_s = np.diff(ts)
+    drops = []
+    # A dropped message makes every later message look one period later than its index says, so
+    # the earliest-arrival level (the "floor": the least-delayed messages) steps up by one period.
+    # Windows of RETIME_CHUNK_S / 2 always hold some least-delayed messages, so their floors are
+    # reliable. Where the floor steps up, the slot goes right after the last message that is still
+    # on the lower floor: a message can arrive late, but never before it was measured.
+    period0 = float(np.median(dt_s[dt_s > 0])) if np.any(dt_s > 0) else 0.0
+    b = (ts[-1] / (n - 1)) if n > 1 else period0
+    W = max(20, int(round(RETIME_CHUNK_S / 2 / b))) if b > 0 else 20
+    for _ in range(100):
+        b, a = np.polyfit(k, ts, 1)                # ts ≈ a + b k
+        if b <= 0:
+            return {"ok": False, "reason": "stamps do not increase"}
+        r = ts - (a + b * k)
+        nw = n // W
+        if nw < 2:
+            break
+        bounds = [(i * W, (i + 1) * W if i < nw - 1 else n) for i in range(nw)]
+        floors = np.array([r[s0:s1].min() for s0, s1 in bounds])
+        step = np.diff(floors)
+        j = int(np.argmax(step))
+        m = int(round(step[j] / b))
+        if step[j] < 0.6 * b or m < 1:
+            break
+        lo, hi = bounds[j][0], bounds[j + 1][1]
+        low = np.flatnonzero(r[lo:hi] < floors[j] + 0.5 * b)
+        split = lo + int(low.max()) + 1 if len(low) else bounds[j + 1][0]
+        if split >= n:
+            break
+        k[split:] += m
+        drops.append({"before_message": int(split), "t_s": round(float(ts[split]), 3), "missing": m})
+    b, a = np.polyfit(k, ts, 1)
+    r = ts - (a + b * k)
+    base = float(np.percentile(r, RETIME_ENVELOPE_PCT))
+    span = ts[-1]
+    nch = max(1, int(span // RETIME_CHUNK_S))
+    floors = [float(np.percentile(c, RETIME_ENVELOPE_PCT * 5)) for c in np.array_split(r, nch) if len(c) >= 10]
+    wander = (max(floors) - min(floors)) if floors else 0.0
+    t_new = t[0] + np.round((a + base + b * k) * 1e9).astype(np.int64)
+    shift = (t_new - t) / 1e6                       # ms, new - old (mostly negative: arrivals were late)
+    dt_old = np.diff(t) / 1e6
+    out = {"period_ms": round(b * 1e3, 4), "rate_hz": round(1.0 / b, 3), "messages": n,
+           "dropped": int(sum(d["missing"] for d in drops)), "drops": drops[:50],
+           "earliest_arrival_wander_ms": round(wander * 1e3, 2),
+           "old_spacing_ms": {"median": round(float(np.median(dt_old)), 2),
+                              "p10": round(float(np.percentile(dt_old, 10)), 2),
+                              "p90": round(float(np.percentile(dt_old, 90)), 2),
+                              "max": round(float(dt_old.max()), 2)},
+           "shift_ms": {"median": round(float(np.median(shift)), 2),
+                        "p5": round(float(np.percentile(shift, 5)), 2),
+                        "min": round(float(shift.min()), 2), "max": round(float(shift.max()), 2)}}
+    if wander > RETIME_MAX_STEP * b:
+        out.update(ok=False, reason=(f"the earliest arrivals wander by {wander * 1e3:.1f} ms "
+                                     f"(> {RETIME_MAX_STEP:g} x the {b * 1e3:.2f} ms period): messages were "
+                                     "dropped in a way that couldn't be located, so evenly spaced stamps "
+                                     "would slide out of place"))
+        return out
+    out.update(ok=True, reason="", t_new=t_new)
+    return out
+
+
+def retime_series(data: BagData, patterns=RETIME_DEFAULT) -> list[dict]:
+    """Give every recorded series whose name ends with one of `patterns` evenly spaced stamps
+    (see retime_check), in place. A series that fails the check is left unchanged. Run it right
+    after load_bag, before anything is derived or synced. Returns one report per series."""
+    reports = []
+    for s in list(data.series.values()):
+        if s.msgtype == "derived" or not any(s.name.rstrip("/").endswith(p) for p in patterns):
+            continue
+        chk = retime_check(s.t)
+        rep = {"series": s.short, "time_source": s.time_source,
+               **{k: v for k, v in chk.items() if k != "t_new"}}
+        if chk["ok"]:
+            s.t = chk["t_new"]
+            s.info["retimed"] = {k: v for k, v in rep.items() if k not in ("series",)}
+            rep["applied"] = True
+        else:
+            rep["applied"] = False
+        reports.append(rep)
+    return reports
+
+
+def retime_text(reports: list[dict]) -> str:
+    lines = []
+    for r in reports:
+        if r.get("applied"):
+            sm = r["shift_ms"]
+            dr = r.get("dropped", 0)
+            lines.append(f"{r['series']}: re-timed to an even {r['period_ms']:.3f} ms ({r['rate_hz']:.2f} Hz), "
+                         f"{r['messages']} msgs, "
+                         + (f"{dr} dropped (left as empty slots, at t = "
+                            + ", ".join(f"{x['t_s']:.2f}" for x in r.get("drops", [])[:8])
+                            + (" ..." if len(r.get("drops", [])) > 8 else "") + " s after its first message)"
+                            if dr else "none dropped") + f". Old spacing median {r['old_spacing_ms']['median']} ms, "
+                         f"10-90 % {r['old_spacing_ms']['p10']}-{r['old_spacing_ms']['p90']} ms, max "
+                         f"{r['old_spacing_ms']['max']} ms. Stamps moved by median {sm['median']:+.1f} ms "
+                         f"(range {sm['min']:+.1f} to {sm['max']:+.1f} ms).")
+        else:
+            lines.append(f"{r['series']}: NOT re-timed - {r['reason']}")
+    return "\n".join(lines) if lines else "no IMU or depth topic to re-time"
+
+
+def clock_report(data: BagData, patterns=RETIME_DEFAULT) -> str:
+    """Which clock the camera, IMU and depth stamps are on, and any clock warnings."""
+    fi = data.meta.get("frame_info", {})
+    ck = data.meta.get("clock") or {}
+    lines = [f"camera {data.camera_topic}: stamps from {fi.get('time_source', '?')}"]
+    if ck.get("playback_recording"):
+        lines.append(f"bag recorded from a playback at ~{1 / ck['receive_per_header_s']:.2f}x; "
+                     f"all topics use their original header stamps (reference {short_name_(ck.get('reference', ''))})")
+    names = []
+    for s in data.series.values():
+        if s.msgtype != "derived" and any(s.name.rstrip("/").endswith(p) for p in patterns):
+            names.append(s.name)
+            src = {"header": "header stamps, same clock as the camera",
+                   "header-converted": "header stamps on a DIFFERENT clock from the camera's - mapped onto it "
+                                       "through the recorder's receive times",
+                   "receive": "no header - recorder receive time",
+                   "receive-mapped": "no header - recorder receive time mapped onto the camera's clock",
+                   "receive-corrected": "no header - receive time shifted back by a sibling topic's delay"
+                   }.get(s.time_source, s.time_source)
+            lines.append(f"{s.short}: {src}")
+    for w in data.meta.get("warnings", []):
+        if any(n in w for n in names) or "playback" in w:
+            lines.append("  warning: " + w)
+    return "\n".join(lines)
+
+
+def short_name_(name: str) -> str:
+    from bagcache import short_name
+    return short_name(name) if name else ""
+
+
+# --------------------------------------------------------------------------- #
+# tag_to_imu_format: a compact, fixed-order CSV for tag -> IMU work
+# --------------------------------------------------------------------------- #
+TAG_IMU_FORMAT = "tag_to_imu_format"
+TAG_IMU_IMU_FIELDS = ([f"linear_acceleration.{a}" for a in "xyz"] + [f"angular_velocity.{a}" for a in "xyz"]
+                      + [f"orientation.{a}" for a in "xyzw"])
+TAG_IMU_TF_FIELDS = [f"translation_mm.{a}" for a in "xyz"] + [f"rotation.{a}" for a in "xyzw"]
+DEPTH_PREFER = ("bluerov/depth", "bluerov2/depth", "/depth")
+
+
+def _tag_sort_key(child: str):
+    m = re.search(r"(\d+)$", child)
+    return (0, int(m.group(1)), child) if m else (1, 0, child)
+
+
+def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
+    """
+    Column order of the tag_to_imu_format CSV, after the dt column:
+      1. every live tag's deviation from its zero frame, derived/tf[tag_N_zero->tag_N], sorted by
+         tag number: translation_mm.x/y/z (mm, along the zero frame's axes) and rotation.x/y/z/w
+         (quaternion; identity = on the zero pose). Tags without a zero frame are left out.
+      2. the IMU (imu/data): linear_acceleration.x/y/z, angular_velocity.x/y/z, orientation.x/y/z/w
+      3. the depth topic (bluerov/depth; falls back to global_position/rel_alt if there is none)
+    Returns ([(series_name, column)], notes).
+    """
+    notes: list[str] = []
+    cols: list[tuple[str, str]] = []
+
+    # each live tag's deviation from its zero frame: derived/tf[tag_N_zero->tag_N]
+    # (built by tf_tree_series; added here if the caller hasn't done it yet)
+    devs = {s.info["deviation_of"]: s for s in data.series.values()
+            if s.info.get("deviation_of") and all(c in s.cols for c in TAG_IMU_TF_FIELDS)}
+    if not devs and data.n_frames:
+        for s in tf_tree_series(data)[0]:
+            data.series.setdefault(s.name, s)
+            if s.info.get("deviation_of") and all(c in s.cols for c in TAG_IMU_TF_FIELDS):
+                devs[s.info["deviation_of"]] = s
+    live = set()
+    for s in data.series.values():
+        m = TF_EDGE_RE.search(s.name) if s.info.get("kind") == "tf" else None
+        if m and _strip_static(m.group(2).strip("/")) == m.group(2).strip("/"):
+            live.add(m.group(2).strip("/"))
+    no_zero = sorted((live - set(devs)) & {f for f in live if "tag" in f.lower()}, key=_tag_sort_key)
+    if not devs:
+        notes.append("no tag_N_zero reference frames found, so no tag deviations")
+    if no_zero:
+        notes.append(f"left out (no zero frame): {', '.join(no_zero)}")
+    for child in sorted(devs, key=_tag_sort_key):
+        cols += [(devs[child].name, c) for c in TAG_IMU_TF_FIELDS]
+
+    imu = _find_series(data, TAG_IMU_IMU_FIELDS, prefer=("/imu/data",))
+    if imu is None:
+        notes.append("no IMU topic with linear_acceleration, angular_velocity and orientation found")
+    else:
+        cols += [(imu.name, c) for c in TAG_IMU_IMU_FIELDS]
+        notes.append(f"IMU: {imu.short}")
+
+    recorded = [s for s in data.series.values() if s.msgtype != "derived" and s.info.get("kind") == "topic"]
+    depth = None
+    for p in DEPTH_PREFER:
+        depth = next((s for s in recorded if p in s.name.lower()), None)
+        if depth:
+            break
+    if depth is None:
+        depth = next((s for s in recorded if "depth" in s.name.lower()), None)
+    if depth is None:
+        depth = next((s for s in recorded if s.name.endswith("rel_alt")), None)
+        if depth is not None:
+            notes.append(f"no bluerov/depth topic in this bag - used {depth.short} instead")
+    if depth is None:
+        notes.append("no depth topic found")
+    else:
+        dcols = [c for c in depth.cols if depth.kinds.get(c) == "float"]
+        dcols = [c for c in dcols if c in ("data", "depth")] or dcols[:1]
+        cols += [(depth.name, c) for c in dcols]
+        notes.append(f"depth: {depth.short}.{', '.join(dcols)}")
+    return cols, notes
+
+
+def tag_to_imu_sync(data: BagData, start_s=None, stop_s=None, gap_factor: float = GAP_FACTOR,
+                    rate: float | None = None) -> tuple[SyncResult, list[str]]:
+    """Sync just the tag_to_imu_format columns and put them in that order."""
+    wanted, notes = tag_to_imu_layout(data)
+    if not wanted:
+        raise RuntimeError("Nothing to export in tag_to_imu_format: " + "; ".join(notes))
+    res = sync(data, start_s, stop_s, wanted, gap_factor, rate)
+    by_name = {n: i for i, n in enumerate(res.names)}
+    order = [by_name[f"{data.series[n].short}.{c}"] for n, c in wanted if f"{data.series[n].short}.{c}" in by_name]
+    out = SyncResult(t=res.t, t0=res.t0, frame_idx=res.frame_idx, notes=res.notes)
+    for i in order:
+        out.names.append(res.names[i])
+        out.kinds.append(res.kinds[i])
+        out.modes.append(res.modes[i])
+        out.values.append(res.values[i])
+    return out, notes
+
+
+def frame_dt(data: BagData, res: SyncResult, rate: float | None = None) -> np.ndarray:
+    """Seconds between each row's camera frame and the frame before it in the bag (NaN for the
+    bag's first frame). With fixed-rate rows: the row spacing."""
+    if res.frame_idx is not None and data.n_frames:
+        idx = np.asarray(res.frame_idx, int)
+        dt = np.full(len(idx), np.nan)
+        ok = idx > 0
+        dt[ok] = (data.frame_t[idx[ok]] - data.frame_t[idx[ok] - 1]) / 1e9
+        return dt
+    dt = np.full(res.n_rows, np.nan)
+    if res.n_rows:
+        dt[1:] = np.diff(res.t) / 1e9
+        dt[0] = 1.0 / rate if rate else np.nan
+    return dt
+
+
+def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
+                         meta: dict | None = None, sidecar: bool = False) -> Path:
+    """tag_to_imu_format CSV: dt_s first, then the tag tf columns, the IMU columns, the depth column."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    dt = frame_dt(data, res, rate)
+    cols = [["" if x != x else f"{x:.9f}" for x in dt.tolist()]]
+    cols += [_fmt_col(v, k) for v, k in zip(res.values, res.kinds)]
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["dt_s"] + res.names)
+        w.writerows(zip(*cols))
+    if sidecar:
+        side = {"csv": path.name, "format": TAG_IMU_FORMAT, "rows": res.n_rows,
+                "first_timestamp": _fmt_ns(int(res.t[0])) if res.n_rows else None,
+                "window_t_s": [float((res.t[0] - res.t0) / 1e9), float((res.t[-1] - res.t0) / 1e9)]
+                if res.n_rows else None,
+                "frame_idx_range": [int(res.frame_idx[0]), int(res.frame_idx[-1])]
+                if res.frame_idx is not None and res.n_rows else None,
+                "dt_s": "seconds since the previous camera frame in the bag (blank for the bag's first frame)",
+                "columns": {n: m for n, m in zip(res.names, res.modes)}, "series": res.notes}
+        if meta:
+            side.update(meta)
+        path.with_suffix(".sync.json").write_text(json.dumps(side, indent=1))
+    return path
+
+
 def export_images(data: BagData, res: SyncResult, out_dir: str | Path, progress=None) -> int:
     """Write the full-resolution frames of a sync window as PNGs named <frame_idx>_<timestamp>.png."""
     import cv2
@@ -1224,6 +1524,8 @@ IMU_TEST_CASES = [
                                                             pitch_osc_deg=25, gyro_noise=0.002)),
     ("IMU mounted 8° left of the nose", dict(mount_yaw_deg=8.0)),
     ("-0.2 m/s² surge error while thrusting", dict(thrust_err=(-0.2, 0.0, 0))),
+    ("+0.25 m/s² SWAY error while thrusting", dict(thrust_err=(0.0, 0.25, 0))),
+    ("yaw gyro offset 0.003 rad/s, Start rocking", dict(gyro_bias=(0, 0, 0.003), rock_start_deg=3)),
 ]
 
 
@@ -1293,6 +1595,14 @@ def main(argv=None):
     ap.add_argument("--tag-px", dest="tag_px", nargs="*", metavar="TF",
                     help="add unfiltered pixel-centre x/y (translation.x_px / y_px, full bandwidth) to tf "
                          "series containing these words (e.g. tag_18). No smoothing is applied.")
+    ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT), default="standard",
+                    help=f"'{TAG_IMU_FORMAT}': dt between camera frames, then each tag's tf (translation + "
+                         "quaternion), the IMU (linear_acceleration, angular_velocity, orientation), and the "
+                         "depth topic last. Ignores --topics and --integrate-imu.")
+    ap.add_argument("--retime", action="store_true",
+                    help="give the IMU and depth topics evenly spaced stamps before syncing (for topics stamped "
+                         "on arrival, e.g. MAVROS with timesync off). Dropped messages are located and left as "
+                         "empty slots; if the timing can't be lined up, that topic is left as recorded.")
     ap.add_argument("--sidecar", action="store_true", help="also write <csv>.sync.json with the settings used")
     ap.add_argument("--rebuild", action="store_true", help="ignore the cache and re-read the bag")
     ap.add_argument("--selftest-imu", action="store_true",
@@ -1309,6 +1619,11 @@ def main(argv=None):
     data = load_bag(a.bag, camera_topic=a.camera, progress=_cli_progress, rebuild=a.rebuild,
                     msg_dir=a.msg_dir, include_covariance=a.include_covariance)
     print(f"Loaded in {time.time() - t_load:.1f} s")
+    print("Clocks:\n  " + clock_report(data).replace("\n", "\n  "))
+    retime_reports = []
+    if a.retime:
+        retime_reports = retime_series(data)
+        print("Even re-timing:\n  " + retime_text(retime_reports).replace("\n", "\n  "))
     tf_ser, tf_notes = tf_tree_series(data)
     for s_ in tf_ser:
         data.series[s_.name] = s_
@@ -1354,6 +1669,24 @@ def main(argv=None):
             data.series[s_int.name] = s_int
             print(imu_summary(s_int.info))
 
+    if a.format == TAG_IMU_FORMAT:
+        res, notes = tag_to_imu_sync(data, a.start, a.stop, a.gap_factor, a.rate)
+        if res.n_rows == 0:
+            print("No camera frames inside that window.")
+            return 1
+        out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_{TAG_IMU_FORMAT}.csv"
+        write_tag_to_imu_csv(data, res, out, a.rate, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
+                                                      "gap_factor": a.gap_factor, "notes": notes,
+                                                      "retimed": retime_reports},
+                             sidecar=a.sidecar)
+        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 1} columns, {TAG_IMU_FORMAT})")
+        for n in notes:
+            print("  " + n)
+        if a.export_images:
+            n = export_images(data, res, a.export_images, _cli_progress)
+            print(f"Wrote {n} frames to {a.export_images}")
+        return 0
+
     columns = None
     if a.topics:
         a.topics = list(a.topics) + (["derived/imu_vel"] if a.integrate_imu else []) + \
@@ -1371,7 +1704,8 @@ def main(argv=None):
     out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_synced.csv"
     write_csv(res, out, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
                          "gap_factor": a.gap_factor, "fixed_rate_hz": a.rate,
-                         "warnings": data.meta.get("warnings", [])}, sidecar=a.sidecar)
+                         "warnings": data.meta.get("warnings", []), "retimed": retime_reports},
+              sidecar=a.sidecar)
     blanks = sum(int(np.sum(v != v)) if v.dtype != object else 0 for v in res.values)
     print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 3} columns, "
           f"t_s {(res.t[0] - res.t0) / 1e9:.3f} -> {(res.t[-1] - res.t0) / 1e9:.3f}, "

@@ -2,7 +2,11 @@
   <node pkg="vimbax_camera" exec="vimbax_camera_node" name="sealbot_camera" namespace="camera" output="screen">
     <param name="camera_id" value="DEV_1AB22C0B5BB3" />
     <param name="camera_frame_id" value="camera_optical_frame" />
-    <param name="use-ros-time" value="true" />
+    <!-- Stamp images with the camera's own capture time converted to ROS time
+         (needs the Sealbot patch to vimbax_camera; see sealbot_camera_time_sync.patch).
+         use_ros_time is the fallback (arrival time) until the clocks are synced. -->
+    <param name="sync_camera_time" value="true" />
+    <param name="use_ros_time" value="true" />
     <param name="settings_file" value="$(find-pkg-share camera_bringup)/config/cleanparams10_20_ROI.xml" />
     <param name="camera_info_url" value="file://$(find-pkg-share camera_bringup)/config/camera_info10_20_ROI.yaml" />
     <remap from="~/image_raw" to="/camera/image_raw" />

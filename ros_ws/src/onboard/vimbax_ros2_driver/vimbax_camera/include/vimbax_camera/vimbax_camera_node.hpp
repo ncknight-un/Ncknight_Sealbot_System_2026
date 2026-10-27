@@ -106,6 +106,17 @@ private:
   const std::string parameter_camera_info_url = "camera_info_url";
   const std::string parameter_command_feature_timeout = "command_feature_timeout";
   const std::string parameter_use_ros_time = "use_ros_time";
+  // Sealbot patch: camera clock -> ROS time
+  const std::string parameter_sync_camera_time = "sync_camera_time";
+  const std::string parameter_camera_time_sync_period = "camera_time_sync_period";
+  std::atomic<int64_t> camera_clock_offset_ns_{0};   // ROS time - camera time
+  std::atomic_bool camera_clock_offset_valid_{false};
+  rclcpp::TimerBase::SharedPtr camera_time_sync_timer_;
+  rclcpp::CallbackGroup::SharedPtr camera_time_sync_callback_group_;
+  bool initialize_camera_time_sync();
+  void sync_camera_time();
+  rclcpp::Time camera_time_to_ros(uint64_t camera_time_ns);
+  // End Sealbot patch
 
   std::atomic_bool stream_stopped_by_service_ = false;
   std::atomic_bool is_available_ = false;

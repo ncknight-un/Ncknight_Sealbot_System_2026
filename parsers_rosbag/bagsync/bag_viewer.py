@@ -41,7 +41,9 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 from bagcache import VERSION, BagData, autopilot_note, bag_summary, field_status, load_bag
 from sync_export import (REFERENCE_TAGS, DERIVED_IMU, DERIVED_THR, GAP_FACTOR, HORIZONTAL_CHANNELS, export_images,
                          heading_series, tag_pixel_position, tf_frames, tf_pair_series, tf_tree_series,
-                         tf_tree_text, imu_summary, integrate_imu, sync, thruster_series, write_csv)
+                         tf_tree_text, imu_summary, integrate_imu, sync, thruster_series, write_csv,
+                         TAG_IMU_FORMAT, tag_to_imu_sync, write_tag_to_imu_csv,
+                         clock_report, retime_series, retime_text)
 
 try:
     import cv2
@@ -232,6 +234,87 @@ class Worker(QtCore.QThread):
 # --------------------------------------------------------------------------- #
 # Main window
 # --------------------------------------------------------------------------- #
+class FlowLayout(QtWidgets.QLayout):
+    """Lays widgets out left to right and wraps onto the next line when the width runs out, so a
+    row of control groups never forces the window wider than the screen."""
+
+    def __init__(self, parent=None, spacing=8):
+        super().__init__(parent)
+        self._items: list = []
+        self._sp = spacing
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return QtCore.Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, w):
+        return self._do_layout(QtCore.QRect(0, 0, w, 0), apply=False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, apply=True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        s = QtCore.QSize()
+        for it in self._items:
+            s = s.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return s + QtCore.QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do_layout(self, rect, apply):
+        m = self.contentsMargins()
+        r = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        # split the items into lines, then share each line's spare width out between its items
+        lines, line, used = [], [], 0
+        for it in self._items:
+            w = it.sizeHint().width()
+            if line and used + self._sp + w > r.width():
+                lines.append(line)
+                line, used = [], 0
+            used += (self._sp if line else 0) + w
+            line.append(it)
+        if line:
+            lines.append(line)
+        y = r.y()
+        for ln in lines:
+            hints = [it.sizeHint().width() for it in ln]
+            spare = max(0, r.width() - sum(hints) - self._sp * (len(ln) - 1))
+            h = max(it.sizeHint().height() for it in ln)
+            x = r.x()
+            for it, w in zip(ln, hints):
+                w = min(w + spare // len(ln), r.width())
+                if apply:
+                    it.setGeometry(QtCore.QRect(x, y, w, h))
+                x += w + self._sp
+            y += h + self._sp
+        return y - self._sp - r.y() + m.top() + m.bottom()
+
+
+def _shrinkable_combo(cb: QtWidgets.QComboBox, chars: int = 12) -> QtWidgets.QComboBox:
+    """Let a combo box with long items be narrower than its longest item (the popup still shows it)."""
+    cb.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+    cb.setMinimumContentsLength(chars)
+    cb.view().setMinimumWidth(cb.view().sizeHintForColumn(0) + 24)
+    return cb
+
+
 class Viewer(QtWidgets.QMainWindow):
     def __init__(self, args):
         super().__init__()
@@ -267,8 +350,11 @@ class Viewer(QtWidgets.QMainWindow):
         print(f"[bagsync] {VERSION}  viewer: {Path(__file__).resolve()}\n"
               f"[bagsync]   bagcache: {Path(_bc.__file__).resolve()}\n"
               f"[bagsync]   sync_export: {Path(_se.__file__).resolve()}", flush=True)
-        self.resize(1600, 950)
         self._build_ui()
+        # start at 1600 x 950, or the screen's free area if that's smaller
+        scr = QtWidgets.QApplication.primaryScreen()
+        avail = scr.availableGeometry() if scr else QtCore.QRect(0, 0, 1600, 950)
+        self.resize(min(1600, avail.width()), min(950, avail.height()))
         self._build_shortcuts()
 
         self._cursor_timer = QtCore.QTimer(self, singleShot=True, interval=15)
@@ -348,13 +434,17 @@ class Viewer(QtWidgets.QMainWindow):
                                "scale centred on each plot's data. Zooming or panning a plot takes it out of the\n"
                                "group until you press its 'A' button.")
         self.same_y.toggled.connect(lambda *_: self._fit_y())
-        btns.addWidget(self.same_y)
         self.end_labels = QtWidgets.QCheckBox("Units at line ends", checked=True)
         self.end_labels.toggled.connect(lambda *_: self._rebuild_plots())
-        btns.addWidget(self.end_labels)
+        # second row, so the field panel can be narrow
+        btns2 = QtWidgets.QHBoxLayout()
+        btns2.addWidget(self.same_y)
+        btns2.addWidget(self.end_labels)
+        btns2.addStretch(1)
         lv.addWidget(self.filter_edit)
         lv.addWidget(self.tree, 1)
         lv.addLayout(btns)
+        lv.addLayout(btns2)
 
         # middle: plots
         self.plot_widget = pg.GraphicsLayoutWidget()
@@ -472,7 +562,13 @@ class Viewer(QtWidgets.QMainWindow):
             lambda i: (self.rate_spin.setEnabled(i == 1), self._update_window_label()))
         self.rate_spin.valueChanged.connect(lambda *_: self._update_window_label())
         self.cols_mode = QtWidgets.QComboBox()
-        self.cols_mode.addItems(["Export all fields", "Export ticked fields only"])
+        self.cols_mode.addItems(["Export all fields", "Export ticked fields only", TAG_IMU_FORMAT])
+        self.cols_mode.setItemData(2, (
+            "dt_s (seconds since the previous camera frame), then every tag's tf\n"
+            "(translation x/y/z + quaternion x/y/z/w, sorted by tag number), then the IMU\n"
+            "(linear_acceleration, angular_velocity, orientation quaternion), and the\n"
+            "bluerov/depth topic as the last column. 'Include IMU velocity' is ignored."),
+            QtCore.Qt.ItemDataRole.ToolTipRole)
         self.gap_spin = QtWidgets.QDoubleSpinBox(decimals=1, value=GAP_FACTOR, prefix="gap × ")
         self.gap_spin.setRange(1.0, 1000.0)
         self.gap_spin.setToolTip("Leave a value blank when the frame falls in a gap longer than this many "
@@ -506,6 +602,18 @@ class Viewer(QtWidgets.QMainWindow):
         self.export_btn.setStyleSheet("font-weight: 600; padding: 4px 14px;")
         self.export_btn.clicked.connect(self.export)
 
+        self.retime_check = QtWidgets.QCheckBox("Even IMU timing")
+        self.retime_check.setToolTip(
+            "Give the IMU and depth topics evenly spaced timestamps before anything is plotted,\n"
+            "integrated or exported. For topics stamped when they ARRIVE (MAVROS with timesync off):\n"
+            "the link delivers them in bursts, so their stamps bunch up. The readings keep their order;\n"
+            "the new stamps follow the earliest arrivals. Dropped messages are located and left as\n"
+            "empty slots. If the timing can't be lined up, that topic is left as recorded.\n"
+            "Bag info shows what was done and which clock each topic is on. The bag isn't changed.")
+        self.retime_check.toggled.connect(self._retime_toggled)
+        self._retime_reports: list = []
+        self._keep_window = None
+
         self.imu_btn = QtWidgets.QPushButton("IMU velocity…")
         self.imu_btn.setToolTip("Open a window with the IMU acceleration, velocity and distance for Start→Stop.")
         self.imu_btn.clicked.connect(self.open_imu_window)
@@ -534,17 +642,22 @@ class Viewer(QtWidgets.QMainWindow):
         ])
         g_calc = group("Calculations", [
             [self.imu_btn, "IMU assumes:", self.imu_mode, None],
-            [self.px_btn, self.tf_btn, None],
+            [self.px_btn, self.tf_btn, self.retime_check, None],
         ])
         g_exp = group("Export CSV", [
             [self.sync_mode, self.rate_spin, self.cols_mode, self.gap_spin, None],
             [self.imu_check, self.png_check, self.json_check, None, self.export_btn],
         ])
+        for cb in (self.sync_mode, self.cols_mode, self.imu_mode):
+            _shrinkable_combo(cb)
+        # the three groups wrap onto a second line when the window is narrow
+        bv.removeItem(bl)
+        flow_host = QtWidgets.QWidget()
+        flow = FlowLayout(flow_host, spacing=8)
+        flow.setContentsMargins(0, 0, 0, 0)
         for g in (g_win, g_calc, g_exp):
-            bl.addWidget(g)
-        bl.setStretch(0, 3)
-        bl.setStretch(1, 2)
-        bl.setStretch(2, 3)
+            flow.addWidget(g)
+        bv.addWidget(flow_host)
 
         central = QtWidgets.QWidget()
         cv = QtWidgets.QVBoxLayout(central)
@@ -640,6 +753,13 @@ class Viewer(QtWidgets.QMainWindow):
         self.rectify.setChecked(data.has_distortion)
         self.rectify.setEnabled(data.meta.get("camera_info") is not None)
         self.rectify.blockSignals(False)
+        self._retime_reports = retime_series(data) if self.retime_check.isChecked() else []
+        if self._retime_reports:
+            ok = [r for r in self._retime_reports if r.get("applied")]
+            self.statusBar().showMessage(
+                f"Even IMU timing: {len(ok)} of {len(self._retime_reports)} topics re-timed"
+                + ("" if len(ok) == len(self._retime_reports) else " (see Bag info for why)"), 15000)
+            print("[bagsync] even re-timing:\n  " + retime_text(self._retime_reports).replace("\n", "\n  "), flush=True)
         self._compute_thrusters()
         try:
             hdg = heading_series(data)
@@ -658,10 +778,21 @@ class Viewer(QtWidgets.QMainWindow):
         self._set_enabled(True)
         self._rebuild_plots()
         self._full_window()
+        if self._keep_window is not None:
+            lo, hi = self._keep_window
+            self._keep_window = None
+            self.set_window(min(lo, self._t_end), min(hi, self._t_end))
         self._update_imu_velocity()
         self.frame = -1
         self.set_frame(0, move_cursor=True)
         self.img_view.autoRange(padding=0)
+
+    def _retime_toggled(self, on):
+        if not self.data:
+            return
+        # reload from the cache (instant) so the stamps start from the recorded ones again
+        self._keep_window = (self.start_spin.value(), self.stop_spin.value())
+        self.open_bag(self.data.bag_dir)
 
     def show_rates(self):
         """Table of every recorded topic: message type, count and rate (messages / time)."""
@@ -734,6 +865,9 @@ class Viewer(QtWidgets.QMainWindow):
         if ci:
             text += f"\n\nCamera info ({ci['topic']}): {ci['width']}x{ci['height']} {ci['distortion_model']}\n" \
                     f"  K = {ci['k']}\n  D = {ci['d']}\n  R = {ci.get('r')}\n  P = {ci['p']}"
+        text += "\n\nClocks (camera, IMU, depth):\n  " + clock_report(self.data).replace("\n", "\n  ")
+        if self.retime_check.isChecked():
+            text += "\nEven IMU timing:\n  " + retime_text(self._retime_reports).replace("\n", "\n  ")
         text += "\n\n" + tf_tree_text(self.data)
         if self._tf_notes:
             text += "\n" + "\n".join("  " + n for n in self._tf_notes)
@@ -1656,9 +1790,14 @@ class Viewer(QtWidgets.QMainWindow):
         if not d:
             return
         lo, hi = self.start_spin.value(), self.stop_spin.value()
-        default = d.bag_dir.parent / f"{d.bag_dir.name}_{lo:.2f}-{hi:.2f}s.csv"
+        tag_imu = self.cols_mode.currentIndex() == 2
+        suffix = f"_{TAG_IMU_FORMAT}" if tag_imu else ""
+        default = d.bag_dir.parent / f"{d.bag_dir.name}_{lo:.2f}-{hi:.2f}s{suffix}.csv"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export synced CSV", str(default), "CSV (*.csv)")
         if not path:
+            return
+        if tag_imu:
+            self._export_tag_to_imu(path, lo, hi)
             return
         cols = None
         if self.cols_mode.currentIndex() == 1:
@@ -1683,7 +1822,8 @@ class Viewer(QtWidgets.QMainWindow):
                 raise RuntimeError("No rows inside that window.")
             write_csv(res, path, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
                                   "gap_factor": self.gap_spin.value(), "fixed_rate_hz": rate,
-                                  "warnings": d.meta.get("warnings", [])}, sidecar=self.json_check.isChecked())
+                                  "warnings": d.meta.get("warnings", []), "retimed": self._retime_reports},
+                     sidecar=self.json_check.isChecked())
         except Exception as e:  # noqa: BLE001
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, "Export failed", str(e))
@@ -1695,7 +1835,35 @@ class Viewer(QtWidgets.QMainWindow):
         QtWidgets.QApplication.restoreOverrideCursor()
         msg = f"Wrote {Path(path).name}: {res.n_rows} rows × {len(res.names) + 3} columns"
         self.statusBar().showMessage(msg, 12000)
+        self._maybe_export_pngs(res, path, msg)
 
+    def _export_tag_to_imu(self, path, lo, hi):
+        d = self.data
+        rate = self.rate_spin.value() if self.sync_mode.currentIndex() == 1 else None
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            res, notes = tag_to_imu_sync(d, lo, hi, self.gap_spin.value(), rate)
+            if res.n_rows == 0:
+                raise RuntimeError("No rows inside that window.")
+            write_tag_to_imu_csv(d, res, path, rate, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
+                                                      "gap_factor": self.gap_spin.value(), "notes": notes,
+                                                      "retimed": self._retime_reports},
+                                 sidecar=self.json_check.isChecked())
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QApplication.restoreOverrideCursor()
+            QtWidgets.QMessageBox.critical(self, "Export failed", str(e))
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 1} columns"
+               f"  ·  {'; '.join(notes)}")
+        print("[bagsync] " + msg)
+        self.statusBar().showMessage(msg, 15000)
+        if any(n.startswith("no ") for n in notes):
+            QtWidgets.QMessageBox.information(self, TAG_IMU_FORMAT, "\n".join(notes))
+        self._maybe_export_pngs(res, path, msg)
+
+    def _maybe_export_pngs(self, res, path, msg):
+        d = self.data
         if self.png_check.isChecked() and res.frame_idx is not None:
             out_dir = Path(path).with_suffix("")
             out_dir = out_dir.parent / f"{out_dir.name}_frames"
@@ -1721,7 +1889,9 @@ class ImuWindow(QtWidgets.QWidget):
         super().__init__(viewer, QtCore.Qt.WindowType.Window)
         self.v = viewer
         self.setWindowTitle("IMU velocity")
-        self.resize(1150, 950)
+        scr = QtWidgets.QApplication.primaryScreen()
+        avail = scr.availableGeometry() if scr else QtCore.QRect(0, 0, 1150, 950)
+        self.resize(min(1150, avail.width()), min(950, avail.height()))
         lay = QtWidgets.QVBoxLayout(self)
         self.summary = QtWidgets.QLabel()
         self.summary.setWordWrap(True)

@@ -65,8 +65,8 @@ def generate_launch_description():
             "surface_pressure", default_value="0.0",
             description="Surface reference pressure in Pa (0 = auto-zero at startup)"),
         DeclareLaunchArgument(
-            "disable_timesync", default_value="true",
-            description="Turn off MAVROS timesync so data is stamped with Jetson time"),
+            "disable_timesync", default_value="false",
+            description="Turn off MAVROS timesync (data then stamped on arrival, not when measured)"),
         DeclareLaunchArgument(
             "latency_period", default_value="1.0",
             description="Seconds between /MAVROS_latency probes (0 = off)"),

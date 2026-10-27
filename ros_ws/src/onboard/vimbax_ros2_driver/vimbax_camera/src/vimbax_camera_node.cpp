@@ -39,6 +39,8 @@
 
 #include <vimbax_camera/vimbax_camera_helper.hpp>
 
+#include <limits>
+
 #include <vimbax_camera/vimbax_camera_node.hpp>
 #include <vimbax_camera/vimbax_camera.hpp>
 
@@ -99,6 +101,10 @@ bool VimbaXCameraNode::initialize(const rclcpp::NodeOptions & options)
   }
 
   if (!initialize_callback_groups()) {
+    return false;
+  }
+
+  if (!initialize_camera_time_sync()) {
     return false;
   }
 
@@ -304,6 +310,20 @@ bool VimbaXCameraNode::initialize_parameters()
   .set__description("Use ROS time instead of camera timestamp in image message header");
   node_->declare_parameter(parameter_use_ros_time, false, use_ros_time_param_desc);
 
+  // Sealbot patch: camera clock -> ROS time
+  auto const sync_camera_time_param_desc = rcl_interfaces::msg::ParameterDescriptor{}
+  .set__description(
+    "Stamp images with the camera timestamp converted to ROS time (overrides use_ros_time)")
+  .set__read_only(true);
+  node_->declare_parameter(parameter_sync_camera_time, false, sync_camera_time_param_desc);
+
+  auto const camera_time_sync_period_param_desc = rcl_interfaces::msg::ParameterDescriptor{}
+  .set__description("Seconds between camera clock offset updates for sync_camera_time")
+  .set__read_only(true);
+  node_->declare_parameter(
+    parameter_camera_time_sync_period, 1.0, camera_time_sync_period_param_desc);
+  // End Sealbot patch
+
   parameter_callback_handle_ = node_->add_on_set_parameters_callback(
     [this](
       const std::vector<rclcpp::Parameter> & params) -> rcl_interfaces::msg::SetParametersResult {
@@ -423,9 +443,119 @@ bool VimbaXCameraNode::initialize_camera(bool reconnect /*= false*/)
     node_->get_parameter(parameter_camera_info_url).as_string());
 
   is_available_ = true;
+  camera_clock_offset_valid_ = false;  // Sealbot patch: a (re)opened camera needs a new offset
 
   return true;
 }
+
+// Sealbot patch: camera clock -> ROS time
+bool VimbaXCameraNode::initialize_camera_time_sync()
+{
+  if (!node_->get_parameter(parameter_sync_camera_time).as_bool()) {
+    return true;
+  }
+
+  {
+    std::shared_lock lock(camera_mutex_);
+    if (!camera_->has_feature("TimestampLatch") || !camera_->has_feature("TimestampLatchValue")) {
+      RCLCPP_WARN(
+        get_logger(), "Camera has no TimestampLatch; sync_camera_time falls back to ROS time "
+        "on arrival");
+      return true;
+    }
+  }
+
+  camera_time_sync_callback_group_ =
+    node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+
+  auto const period = std::chrono::duration<double>(
+    node_->get_parameter(parameter_camera_time_sync_period).as_double());
+  camera_time_sync_timer_ = node_->create_wall_timer(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+    [this] {sync_camera_time();}, camera_time_sync_callback_group_);
+
+  sync_camera_time();
+  return true;
+}
+
+void VimbaXCameraNode::sync_camera_time()
+{
+  constexpr int kLatchesPerSync{5};
+
+  std::shared_lock lock(camera_mutex_);
+  if (!is_available_) {
+    return;
+  }
+
+  // The latch happens somewhere between t0 and t1, so take the midpoint and keep the
+  // sample with the shortest round trip (least uncertainty).
+  int64_t best_round_trip{std::numeric_limits<int64_t>::max()};
+  int64_t best_offset{};
+  for (int i = 0; i < kLatchesPerSync; ++i) {
+    auto const t0 = node_->now().nanoseconds();
+    auto const latch = camera_->timestamp_latch();
+    auto const t1 = node_->now().nanoseconds();
+    if (!latch) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *node_->get_clock(), 10000, "TimestampLatch failed with %d (%s)",
+        latch.error().code, (vmb_error_to_string(latch.error().code)).data());
+      return;
+    }
+
+    auto const camera_ns = camera_->timestamp_latch_value_ns();
+    if (!camera_ns) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *node_->get_clock(), 10000, "Reading TimestampLatchValue failed with %d (%s)",
+        camera_ns.error().code, (vmb_error_to_string(camera_ns.error().code)).data());
+      return;
+    }
+
+    if (t1 - t0 < best_round_trip) {
+      best_round_trip = t1 - t0;
+      best_offset = t0 + (t1 - t0) / 2 - static_cast<int64_t>(*camera_ns);
+    }
+  }
+
+  camera_clock_offset_ns_ = best_offset;
+  if (!camera_clock_offset_valid_.exchange(true)) {
+    RCLCPP_INFO(
+      get_logger(), "Camera clock synced to ROS time (latch round trip %.2f ms)",
+      best_round_trip / 1e6);
+  }
+  if (best_round_trip > 5'000'000) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *node_->get_clock(), 10000,
+      "Camera clock latch round trip %.2f ms; image stamps uncertain by about half that",
+      best_round_trip / 1e6);
+  }
+}
+
+rclcpp::Time VimbaXCameraNode::camera_time_to_ros(uint64_t camera_time_ns)
+{
+  auto const now = node_->now();
+  if (!camera_clock_offset_valid_) {
+    return now;
+  }
+
+  rclcpp::Time const stamp{
+    static_cast<int64_t>(camera_time_ns) + camera_clock_offset_ns_.load(),
+    now.get_clock_type()};
+
+  // A frame can't be from the future, or much older than the frame buffers allow. If it is,
+  // the camera clock jumped (reset or reconnect) and the offset is stale until the next sync.
+  if (stamp > now + rclcpp::Duration::from_seconds(0.01) ||
+    stamp < now - rclcpp::Duration::from_seconds(1.0))
+  {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *node_->get_clock(), 5000,
+      "Camera stamp %.3f s from arrival time; using arrival time until clocks resync",
+      (stamp - now).seconds());
+    return now;
+  }
+
+  return stamp;
+}
+// End Sealbot patch
 
 bool VimbaXCameraNode::initialize_camera_observer()
 {
@@ -1605,7 +1735,10 @@ result<void> VimbaXCameraNode::start_streaming()
       frame->header.set__frame_id(node_->get_parameter(parameter_frame_id).as_string());
 
 
-      if (node_->get_parameter(parameter_use_ros_time).as_bool()) {
+      if (node_->get_parameter(parameter_sync_camera_time).as_bool()) {
+        // Sealbot patch: camera clock -> ROS time
+        frame->header.stamp = camera_time_to_ros(frame->get_timestamp_ns());
+      } else if (node_->get_parameter(parameter_use_ros_time).as_bool()) {
         frame->header.stamp = node_->now();
       } else {
         std::chrono::nanoseconds vmbTimeStamp{frame->get_timestamp_ns()};

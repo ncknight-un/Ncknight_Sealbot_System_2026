@@ -164,6 +164,10 @@ public:
   result<void> stop_streaming();
 
   bool is_alive() const;
+
+  // Sealbot patch: read the camera clock so frame timestamps can be converted to ROS time.
+  result<void> timestamp_latch() const;
+  result<uint64_t> timestamp_latch_value_ns() const;
   bool has_feature(const std::string_view & name, const Module module = Module::RemoteDevice) const;
 
   // Feature access

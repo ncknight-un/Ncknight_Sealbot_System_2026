@@ -21,13 +21,14 @@ Ping360Sonar::Ping360Sonar(rclcpp::NodeOptions options)
   declareParamDescription("gain", 0, "Sonar gain (0 = low, 1 = normal, 2 = high)", 0, 2);
   declareParamDescription("frequency", 740, "Sonar operating frequency [kHz]", 650, 850);
   declareParamDescription("range_max", 2, "Sonar max range [m]", 1, 50);
-  declareParamDescription("angle_sector", 360, "Scanned angular sector around sonar heading [degrees]. Will oscillate if not 360", 60, 360);
+  declareParamDescription("angle_sector", 360, "Scanned angular sector around sonar heading [degrees]. Will oscillate if not 360", 4, 360);
   declareParamDescription("angle_step", 1, "Sonar angular resolution [degrees]", 1, 20);
   declareParamDescription("image_size", 300, "Output image size [pixels]", 100, 1000, 2);
   declareParamDescription("scan_threshold", 200, "Intensity threshold for LaserScan message", 1, 255);
   declareParamDescription("speed_of_sound", 1500, "Speed of sound [m/s]", 1450, 1550);
   declareParamDescription("image_rate", 100, "Image publishing rate [ms]", 50, 2000);
   declareParamDescription("sonar_timeout", 8000, "Sonar timeout [ms]", 0, 20000);
+  declareParamDescription("ping_period", 120, "Minimum time between pings [ms]; each ping still waits for the echo", 1, 1000);
 
   // other, unbounded params
   publish_image = declareParamDescription("publish_image", true, "Publish images on 'scan_image'");
@@ -49,7 +50,9 @@ Ping360Sonar::Ping360Sonar(rclcpp::NodeOptions options)
   const auto image_rate_ms{get_parameter("image_rate").as_int()};
   image_timer = this->create_wall_timer(std::chrono::milliseconds(image_rate_ms),
                                         [this](){publishImage();});
-  refresh_timer = this->create_wall_timer(120ms, [this](){refresh();});
+  const auto ping_period_ms{get_parameter("ping_period").as_int()};
+  refresh_timer = this->create_wall_timer(std::chrono::milliseconds(ping_period_ms),
+                                          [this](){refresh();});
 
   param_change = add_on_set_parameters_callback(
                    std::bind(&Ping360Sonar::parametersCallback, this, std::placeholders::_1));

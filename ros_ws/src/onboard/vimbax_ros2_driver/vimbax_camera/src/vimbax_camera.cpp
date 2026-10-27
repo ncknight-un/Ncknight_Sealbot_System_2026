@@ -690,6 +690,44 @@ result<void> VimbaXCamera::feature_command_run(
   return {};
 }
 
+// Sealbot patch: camera clock -> ROS time
+result<void> VimbaXCamera::timestamp_latch() const
+{
+  // Run the command directly: feature_command_run() polls for completion with a 100 ms
+  // sleep, far too coarse to time the latch. The latch happens before this call returns.
+  auto const run_error =
+    api_->FeatureCommandRun(get_module_handle(Module::RemoteDevice), "TimestampLatch");
+
+  if (run_error != VmbErrorSuccess) {
+    return error{run_error};
+  }
+
+  return {};
+}
+
+result<uint64_t> VimbaXCamera::timestamp_latch_value_ns() const
+{
+  auto const value =
+    feature_int_get("TimestampLatchValue", get_module_handle(Module::RemoteDevice));
+
+  if (!value) {
+    return value.error();
+  }
+
+  // Same tick -> ns conversion as Frame::timestamp_to_ns(), so latch and frame times match.
+  auto const ticks = static_cast<uint64_t>(*value);
+  if (timestamp_frequency_) {
+    if (*timestamp_frequency_ > std::nano::den) {
+      return ticks / ((*timestamp_frequency_) / std::nano::den);
+    } else {
+      return ticks * (std::nano::den / (*timestamp_frequency_));
+    }
+  }
+
+  return ticks;
+}
+// End Sealbot patch
+
 result<int64_t> VimbaXCamera::feature_int_get(
   const std::string_view & name,
   const Module module) const

@@ -3,11 +3,19 @@
   <arg name="use_sonar" default="true"/>
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14551@"/>
+  <arg name="sonar_range" default="25" description="Ping360 max range [m]"/>
+  <arg name="sonar_sector" default="10" description="Ping360 scanned sector [deg], centred on the sonar heading"/>
 
   <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_camera)"/>
 
   <node pkg="ping360_sonar" exec="ping360_node" name="ping360_node" output="screen" if="$(var use_sonar)">
     <param name="frame" value="sonar"/>
+    <!-- Forward-looking sweep: ~10 deg sector centred on the sonar heading, out to 25 m -->
+    <param name="range_max" value="$(var sonar_range)"/>
+    <param name="angle_sector" value="$(var sonar_sector)"/>
+    <param name="angle_step" value="1"/>
+    <!-- Ping as soon as the previous echo is back (~35 ms at 25 m) instead of every 120 ms -->
+    <param name="ping_period" value="1"/>
     <!-- Raw echoes on /scan_echo, recorded to the bag and converted to a point cloud on the ground station -->
     <param name="publish_echo" value="true"/>
   </node>
