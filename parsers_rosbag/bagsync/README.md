@@ -245,12 +245,13 @@ The third choice in the export dropdown (or `--format tag_to_imu_format` on the 
 
 | Columns | Meaning |
 |---|---|
+| `t_s` | Seconds since the export's first row: **Start is 0**, whatever the window (a window from 9.97 s starts at 0.000). The sidecar `.json` records where that 0 falls on the viewer's time axis (`t_s_zero_in_bag_s`) |
 | `dt_s` | Seconds since the previous camera frame in the bag (a dropped frame shows as about 2× the usual value; blank only for the bag's very first frame) |
 | `derived/tf[tag_N_zero->tag_N].translation_mm.x/y/z`, `.rotation.x/y/z/w` | Each live tag's deviation from its zero frame (see **TF tree**): mm along the zero frame's axes, and a quaternion that is (0, 0, 0, 1) on the zero pose. Sorted by tag number. Tags without a zero frame are left out and listed in the status bar. Blank when the tag wasn't detected in that frame |
 | `…imu/data.linear_acceleration.x/y/z`, `.angular_velocity.x/y/z`, `.orientation.x/y/z/w` | The IMU, interpolated to the frame time (orientation by SLERP) |
 | `bluerov/depth.data` | The depth topic, last. If the bag has no `bluerov/depth`, it falls back to `global_position/rel_alt` and says so |
 
-There are no `timestamp`/`t_s`/`frame_idx` columns. Tick **Save .json notes** to record the first timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
+There are no `timestamp`/`frame_idx` columns. Tick **Save .json notes** to record the first absolute timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
 
 ```bash
 python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format -o run1_tag_imu.csv
@@ -303,3 +304,28 @@ For new recordings, MAVROS timesync (`timesync_mode = MAVLINK`) stamps each mess
 | `bagcache.py` | Reads the bag, flattens fields, picks time sources, caches arrays and JPEG thumbnails |
 | `sync_export.py` | Interpolation, CSV export, IMU velocity, tf tree; also the command-line tool |
 | `bag_viewer.py` | The GUI |
+| `clock_check.py` | Checks whether the camera and IMU are stamped on the same clock (helper script) |
+| `imu_timing.py` | Shows how evenly the IMU is stamped: rate, spacing, bursts (helper script) |
+| `lag_check.py` | Estimates the tag-to-IMU timing offset from a `tag_to_imu_format` CSV (helper script) |
+
+## Timing helper scripts
+
+Run these from the `bagsync` folder. They only read; nothing is changed.
+
+```bash
+python clock_check.py BAG      # camera and IMU on the same clock?  "SAME clock" = yes
+python imu_timing.py BAG       # IMU rate and stamp spacing; many near-0 spacings + 20-80 ms pauses = stamped on arrival
+python lag_check.py run.csv    # timing offset between tags and IMU, separated from tag bending
+```
+
+- **`clock_check.py`** fits each topic's header stamps against the recorder's times and compares camera and IMU. It reports the rate difference, the offset in ms and a verdict. On sub1_tagged it found the camera on time-since-boot and the IMU on Unix time: different clocks, same rate. bagsync already maps one onto the other.
+- **`imu_timing.py`** on sub1_tagged: 100.0 Hz, but 24 % of spacings under 2 ms and 12 % at 20–40 ms. That is arrival-time bunching, which **Even IMU timing** / `--retime` fixes.
+- **`lag_check.py`** compares each tag with the IMU's acceleration frequency by frequency, and fits one shared timing offset plus a spring model of each tag's bending. It reports the offset with a jackknife uncertainty and a table of each tag's shift by frequency band. It checks its own fit, and when the tags don't behave like simple springs (as on sub1, where they trail by 150–350 ms at 0.3–1 Hz but lead by 10–20 ms at 4–8 Hz) it prints **NO RELIABLE OFFSET** instead of a number. On simulated recordings with known offsets it came within 1–2 ms. A tap test, or a recording with both sensors on ROS time, gives the offset directly.
+
+**Recommended export for training** from bags recorded before the clock fixes:
+
+```bash
+python sync_export.py BAG --retime --gap-factor 10 --format tag_to_imu_format -o run.csv
+```
+
+Check that the output says the IMU and depth were "re-timed" (not "NOT re-timed"). Export every bag the same way. A small fixed offset of a frame or two can remain; a model that sees a few frames of context learns it, as long as live data has the same timing.

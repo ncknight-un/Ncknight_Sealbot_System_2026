@@ -1260,7 +1260,8 @@ def _tag_sort_key(child: str):
 
 def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
     """
-    Column order of the tag_to_imu_format CSV, after the dt column:
+    Column order of the tag_to_imu_format CSV, after t_s (seconds since the export's first row,
+    which is 0) and dt_s (seconds since the previous camera frame):
       1. every live tag's deviation from its zero frame, derived/tf[tag_N_zero->tag_N], sorted by
          tag number: translation_mm.x/y/z (mm, along the zero frame's axes) and rotation.x/y/z/w
          (quaternion; identity = on the zero pose). Tags without a zero frame are left out.
@@ -1358,15 +1359,17 @@ def frame_dt(data: BagData, res: SyncResult, rate: float | None = None) -> np.nd
 
 def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
                          meta: dict | None = None, sidecar: bool = False) -> Path:
-    """tag_to_imu_format CSV: dt_s first, then the tag tf columns, the IMU columns, the depth column."""
+    """tag_to_imu_format CSV: t_s, dt_s, then the tag tf columns, the IMU columns, the depth column."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     dt = frame_dt(data, res, rate)
-    cols = [["" if x != x else f"{x:.9f}" for x in dt.tolist()]]
+    t_rel = (res.t - res.t[0]) / 1e9 if res.n_rows else np.zeros(0)      # the export's Start = 0
+    cols = [[f"{x:.6f}" for x in t_rel],
+            ["" if x != x else f"{x:.9f}" for x in dt.tolist()]]
     cols += [_fmt_col(v, k) for v, k in zip(res.values, res.kinds)]
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["dt_s"] + res.names)
+        w.writerow(["t_s", "dt_s"] + res.names)
         w.writerows(zip(*cols))
     if sidecar:
         side = {"csv": path.name, "format": TAG_IMU_FORMAT, "rows": res.n_rows,
@@ -1375,6 +1378,8 @@ def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate:
                 if res.n_rows else None,
                 "frame_idx_range": [int(res.frame_idx[0]), int(res.frame_idx[-1])]
                 if res.frame_idx is not None and res.n_rows else None,
+                "t_s": "seconds since the export's first row (Start = 0)",
+                "t_s_zero_in_bag_s": float((res.t[0] - res.t0) / 1e9) if res.n_rows else None,
                 "dt_s": "seconds since the previous camera frame in the bag (blank for the bag's first frame)",
                 "columns": {n: m for n, m in zip(res.names, res.modes)}, "series": res.notes}
         if meta:
@@ -1596,8 +1601,8 @@ def main(argv=None):
                     help="add unfiltered pixel-centre x/y (translation.x_px / y_px, full bandwidth) to tf "
                          "series containing these words (e.g. tag_18). No smoothing is applied.")
     ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT), default="standard",
-                    help=f"'{TAG_IMU_FORMAT}': dt between camera frames, then each tag's tf (translation + "
-                         "quaternion), the IMU (linear_acceleration, angular_velocity, orientation), and the "
+                    help=f"'{TAG_IMU_FORMAT}': time since the export's start (0 = --start), dt between camera "
+                         "frames, then each tag's deviation from its zero frame (translation + quaternion), the IMU (linear_acceleration, angular_velocity, orientation), and the "
                          "depth topic last. Ignores --topics and --integrate-imu.")
     ap.add_argument("--retime", action="store_true",
                     help="give the IMU and depth topics evenly spaced stamps before syncing (for topics stamped "
@@ -1679,7 +1684,7 @@ def main(argv=None):
                                                       "gap_factor": a.gap_factor, "notes": notes,
                                                       "retimed": retime_reports},
                              sidecar=a.sidecar)
-        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 1} columns, {TAG_IMU_FORMAT})")
+        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 2} columns, {TAG_IMU_FORMAT})")
         for n in notes:
             print("  " + n)
         if a.export_images:

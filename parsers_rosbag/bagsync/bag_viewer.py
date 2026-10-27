@@ -564,8 +564,9 @@ class Viewer(QtWidgets.QMainWindow):
         self.cols_mode = QtWidgets.QComboBox()
         self.cols_mode.addItems(["Export all fields", "Export ticked fields only", TAG_IMU_FORMAT])
         self.cols_mode.setItemData(2, (
-            "dt_s (seconds since the previous camera frame), then every tag's tf\n"
-            "(translation x/y/z + quaternion x/y/z/w, sorted by tag number), then the IMU\n"
+            "t_s (seconds since Start; the first row is 0), dt_s (seconds since the previous camera\n"
+            "frame), then every tag's deviation from its zero frame (translation x/y/z mm +\n"
+            "quaternion x/y/z/w, sorted by tag number), then the IMU\n"
             "(linear_acceleration, angular_velocity, orientation quaternion), and the\n"
             "bluerov/depth topic as the last column. 'Include IMU velocity' is ignored."),
             QtCore.Qt.ItemDataRole.ToolTipRole)
@@ -1854,7 +1855,7 @@ class Viewer(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Export failed", str(e))
             return
         QtWidgets.QApplication.restoreOverrideCursor()
-        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 1} columns"
+        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 2} columns"
                f"  ·  {'; '.join(notes)}")
         print("[bagsync] " + msg)
         self.statusBar().showMessage(msg, 15000)
