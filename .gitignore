@@ -9,6 +9,9 @@ devel/
 # Ignore processed rosbags
 bags_out/
 
+# Ignore large data sets
+tags_to_imu_data/
+
 # --- Docker & Environment Files ---
 .env
 .env.*
