@@ -43,7 +43,8 @@ from sync_export import (REFERENCE_TAGS, DERIVED_IMU, DERIVED_THR, GAP_FACTOR, H
                          heading_series, tag_pixel_position, tf_frames, tf_pair_series, tf_tree_series,
                          tf_tree_text, imu_summary, integrate_imu, sync, thruster_series, write_csv,
                          TAG_IMU_FORMAT, tag_to_imu_sync, write_tag_to_imu_csv,
-                         clock_report, retime_series, retime_text)
+                         clock_report)
+from fcutime import fcu_text, fcu_time_series
 
 try:
     import cv2
@@ -341,7 +342,6 @@ class Viewer(QtWidgets.QMainWindow):
         self._derived_status: dict[str, str] = {}
         self._separate: dict[str, bool] = {}
         self.thruster_channels = list(HORIZONTAL_CHANNELS)
-        self.imu_yaw_offset = 0.0
         self._tf_notes: list[str] = []
 
         self.setWindowTitle(f"Bag viewer — {VERSION}")
@@ -566,9 +566,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.cols_mode.setItemData(2, (
             "t_s (seconds since Start; the first row is 0), dt_s (seconds since the previous camera\n"
             "frame), then every tag's deviation from its zero frame (translation x/y/z mm +\n"
-            "quaternion x/y/z/w, sorted by tag number), then the IMU\n"
-            "(linear_acceleration, angular_velocity, orientation quaternion), and the\n"
-            "bluerov/depth topic as the last column. 'Include IMU velocity' is ignored."),
+            "quaternion x/y/z/w and a seen flag, sorted by tag number), then the IMU\n"
+            "(linear_acceleration with gravity, angular_velocity), and depth from\n"
+            "global_position/local (pose z, negative underwater) as the last column.\n"
+            "'Include IMU velocity' is ignored."),
             QtCore.Qt.ItemDataRole.ToolTipRole)
         self.gap_spin = QtWidgets.QDoubleSpinBox(decimals=1, value=GAP_FACTOR, prefix="gap × ")
         self.gap_spin.setRange(1.0, 1000.0)
@@ -603,16 +604,15 @@ class Viewer(QtWidgets.QMainWindow):
         self.export_btn.setStyleSheet("font-weight: 600; padding: 4px 14px;")
         self.export_btn.clicked.connect(self.export)
 
-        self.retime_check = QtWidgets.QCheckBox("Even IMU timing")
-        self.retime_check.setToolTip(
-            "Give the IMU and depth topics evenly spaced timestamps before anything is plotted,\n"
-            "integrated or exported. For topics stamped when they ARRIVE (MAVROS with timesync off):\n"
-            "the link delivers them in bursts, so their stamps bunch up. The readings keep their order;\n"
-            "the new stamps follow the earliest arrivals. Dropped messages are located and left as\n"
-            "empty slots. If the timing can't be lined up, that topic is left as recorded.\n"
-            "Bag info shows what was done and which clock each topic is on. The bag isn't changed.")
-        self.retime_check.toggled.connect(self._retime_toggled)
-        self._retime_reports: list = []
+        self.fcu_check = QtWidgets.QCheckBox("Autopilot timing")
+        self.fcu_check.setToolTip(
+            "Give MAVROS topics the autopilot's OWN sample times, decoded from the recorded raw MAVLink\n"
+            "stream (.../mavlink_source), instead of the times they arrived at the Jetson. Topics it\n"
+            "can't do (no timestamped MAVLink source, e.g. state, battery) are left as recorded.\n"
+            "The first time reads the bag (a few seconds); the result is cached. Bag info shows what\n"
+            "was done for each topic. The bag itself is never changed.")
+        self.fcu_check.toggled.connect(self._timing_toggled)
+        self._fcu_reports: list = []
         self._keep_window = None
 
         self.imu_btn = QtWidgets.QPushButton("IMU velocity…")
@@ -643,7 +643,7 @@ class Viewer(QtWidgets.QMainWindow):
         ])
         g_calc = group("Calculations", [
             [self.imu_btn, "IMU assumes:", self.imu_mode, None],
-            [self.px_btn, self.tf_btn, self.retime_check, None],
+            [self.px_btn, self.tf_btn, self.fcu_check, None],
         ])
         g_exp = group("Export CSV", [
             [self.sync_mode, self.rate_spin, self.cols_mode, self.gap_spin, None],
@@ -754,13 +754,19 @@ class Viewer(QtWidgets.QMainWindow):
         self.rectify.setChecked(data.has_distortion)
         self.rectify.setEnabled(data.meta.get("camera_info") is not None)
         self.rectify.blockSignals(False)
-        self._retime_reports = retime_series(data) if self.retime_check.isChecked() else []
-        if self._retime_reports:
-            ok = [r for r in self._retime_reports if r.get("applied")]
-            self.statusBar().showMessage(
-                f"Even IMU timing: {len(ok)} of {len(self._retime_reports)} topics re-timed"
-                + ("" if len(ok) == len(self._retime_reports) else " (see Bag info for why)"), 15000)
-            print("[bagsync] even re-timing:\n  " + retime_text(self._retime_reports).replace("\n", "\n  "), flush=True)
+        self._fcu_reports = []
+        if self.fcu_check.isChecked():
+            try:
+                QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+                try:
+                    self._fcu_reports = fcu_time_series(data)
+                finally:
+                    QtWidgets.QApplication.restoreOverrideCursor()
+            except Exception as e:  # noqa: BLE001
+                self._fcu_reports = [{"series": "(all)", "applied": False, "reason": f"failed: {type(e).__name__}: {e}"}]
+            ok = [r for r in self._fcu_reports if r.get("applied")]
+            self.statusBar().showMessage(f"Autopilot timing: {len(ok)} topic(s) re-stamped (see Bag info)", 15000)
+            print("[bagsync] autopilot timing:\n  " + fcu_text(self._fcu_reports).replace("\n", "\n  "), flush=True)
         self._compute_thrusters()
         try:
             hdg = heading_series(data)
@@ -788,7 +794,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.set_frame(0, move_cursor=True)
         self.img_view.autoRange(padding=0)
 
-    def _retime_toggled(self, on):
+    def _timing_toggled(self, on):
         if not self.data:
             return
         # reload from the cache (instant) so the stamps start from the recorded ones again
@@ -867,8 +873,8 @@ class Viewer(QtWidgets.QMainWindow):
             text += f"\n\nCamera info ({ci['topic']}): {ci['width']}x{ci['height']} {ci['distortion_model']}\n" \
                     f"  K = {ci['k']}\n  D = {ci['d']}\n  R = {ci.get('r')}\n  P = {ci['p']}"
         text += "\n\nClocks (camera, IMU, depth):\n  " + clock_report(self.data).replace("\n", "\n  ")
-        if self.retime_check.isChecked():
-            text += "\nEven IMU timing:\n  " + retime_text(self._retime_reports).replace("\n", "\n  ")
+        if self.fcu_check.isChecked():
+            text += "\nAutopilot timing:\n  " + fcu_text(self._fcu_reports).replace("\n", "\n  ")
         text += "\n\n" + tf_tree_text(self.data)
         if self._tf_notes:
             text += "\n" + "\n".join("  " + n for n in self._tf_notes)
@@ -1334,9 +1340,6 @@ class Viewer(QtWidgets.QMainWindow):
     def _imu_mode_name(self) -> str:
         return "rest" if self.imu_mode.currentIndex() == 0 else "odom"
 
-    def _imu_kwargs(self) -> dict:
-        return {"yaw_offset_deg": self.imu_yaw_offset}
-
     def _derived_note(self, key, text):
         self._derived_status[key] = text
         print(f"[bagsync] {key}: {text}", flush=True)
@@ -1517,10 +1520,6 @@ class Viewer(QtWidgets.QMainWindow):
         self.tree.blockSignals(False)
         self._rebuild_plots()
 
-    def set_imu_yaw_offset(self, deg):
-        self.imu_yaw_offset = float(deg)
-        self._update_imu_velocity(rebuild=True)
-
     def open_imu_window(self):
         if not self.data:
             return
@@ -1540,7 +1539,7 @@ class Viewer(QtWidgets.QMainWindow):
         lo, hi = self.start_spin.value(), self.stop_spin.value()
         had = self._imu_series is not None
         try:
-            new = integrate_imu(self.data, lo, hi, self._imu_mode_name(), **self._imu_kwargs())
+            new = integrate_imu(self.data, lo, hi, self._imu_mode_name())
         except Exception as e:  # noqa: BLE001
             import traceback
             traceback.print_exc()
@@ -1809,7 +1808,7 @@ class Viewer(QtWidgets.QMainWindow):
         rate = self.rate_spin.value() if self.sync_mode.currentIndex() == 1 else None
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         live = d.series.pop(DERIVED_IMU, None)       # the plotted result; restored afterwards
-        imu = (integrate_imu(d, lo, hi, self._imu_mode_name(), **self._imu_kwargs())
+        imu = (integrate_imu(d, lo, hi, self._imu_mode_name())
                if self.imu_check.isChecked() else None)
         try:
             if imu is not None:
@@ -1823,7 +1822,7 @@ class Viewer(QtWidgets.QMainWindow):
                 raise RuntimeError("No rows inside that window.")
             write_csv(res, path, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
                                   "gap_factor": self.gap_spin.value(), "fixed_rate_hz": rate,
-                                  "warnings": d.meta.get("warnings", []), "retimed": self._retime_reports},
+                                  "warnings": d.meta.get("warnings", []), "autopilot_timed": self._fcu_reports},
                      sidecar=self.json_check.isChecked())
         except Exception as e:  # noqa: BLE001
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -1848,7 +1847,7 @@ class Viewer(QtWidgets.QMainWindow):
                 raise RuntimeError("No rows inside that window.")
             write_tag_to_imu_csv(d, res, path, rate, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
                                                       "gap_factor": self.gap_spin.value(), "notes": notes,
-                                                      "retimed": self._retime_reports},
+                                                      "autopilot_timed": self._fcu_reports},
                                  sidecar=self.json_check.isChecked())
         except Exception as e:  # noqa: BLE001
             QtWidgets.QApplication.restoreOverrideCursor()
@@ -1899,17 +1898,6 @@ class ImuWindow(QtWidgets.QWidget):
         self.summary.setTextFormat(QtCore.Qt.TextFormat.RichText)
         self.summary.setTextInteractionFlags(QtCore.Qt.TextInteractionFlag.TextSelectableByMouse)
         row = QtWidgets.QHBoxLayout()
-        self.yaw_spin = QtWidgets.QDoubleSpinBox(decimals=2, minimum=-180, maximum=180, singleStep=0.5,
-                                                 value=viewer.imu_yaw_offset, suffix=" °", keyboardTracking=False)
-        self.yaw_spin.setToolTip("The IMU is mounted this many degrees to the LEFT of the hull's nose.\n"
-                                 "Turns the surge/sway (and forward/sideways) axes; the integration is unchanged.")
-        self.yaw_spin.valueChanged.connect(lambda d: self.v.set_imu_yaw_offset(d))
-        self.yaw_btn = QtWidgets.QPushButton("Set from travel angle")
-        self.yaw_btn.setToolTip("Only on a run you KNOW went straight along the nose: sets the offset so\n"
-                                "that this window's sway distance is 0.")
-        self.yaw_btn.clicked.connect(self._yaw_from_travel)
-        for w in (QtWidgets.QLabel("IMU yaw offset"), self.yaw_spin, self.yaw_btn):
-            row.addWidget(w)
         row.addStretch(1)
         row.addWidget(QtWidgets.QLabel("Mode:"))
         self.mode_label = QtWidgets.QLabel("")
@@ -1949,12 +1937,6 @@ class ImuWindow(QtWidgets.QWidget):
                                f"step {info['imu_median_dt_ms']:.1f} ms, largest gap {info['imu_max_gap_ms']:.0f} ms"
                                + (" (gaps lose acceleration)" if gap_bad else ""), gap_bad))
         return "<br>".join(rows)
-
-    def _yaw_from_travel(self):
-        ser = self.v._imu_series
-        if ser is None:
-            return
-        self.yaw_spin.setValue(self.v.imu_yaw_offset + float(ser.info.get("travel_angle_deg", 0.0)))
 
     def refresh(self):
         v, d = self.v, self.v.data

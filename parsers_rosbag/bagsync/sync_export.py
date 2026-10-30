@@ -43,6 +43,7 @@ from pathlib import Path
 import numpy as np
 
 from bagcache import BagData, Series, bag_summary, load_bag, quat_groups, quat_to_euler_deg
+from fcutime import fcu_text, fcu_time_series
 
 GAP_FACTOR = 3.0
 
@@ -565,8 +566,7 @@ def imu_attitude(t_s, w, f, rest_s=None):
 
 
 def integrate_imu(data: BagData, start_s: float, stop_s: float, mode: str = "rest",
-                  imu: str | None = None, odom: str | None = None,
-                  yaw_offset_deg: float = 0.0) -> Series | None:
+                  imu: str | None = None, odom: str | None = None) -> Series | None:
     """
     Velocity from the IMU alone, between start_s and stop_s (seconds since the first frame).
     The autopilot's orientation estimate is NOT used; only the IMU's gyro (angular_velocity)
@@ -585,7 +585,7 @@ def integrate_imu(data: BagData, start_s: float, stop_s: float, mode: str = "res
 
     Start MUST be at rest (the first REST_CHECK_S seconds). info['rest_check'] then shows how far
     the integrated attitude has drifted by Stop (if Stop is at rest too). att.roll/pitch/yaw_deg
-    is the IMU-only attitude. yaw_offset_deg turns the reported body axes about z.
+    is the IMU-only attitude.
     """
     if mode not in IMU_MODES:
         raise ValueError(f"mode must be one of {IMU_MODES}")
@@ -617,7 +617,7 @@ def integrate_imu(data: BagData, start_s: float, stop_s: float, mode: str = "res
 
     info = {"kind": "derived", "mode": mode, "imu": s_imu.name, "gravity": g, **att_info,
             "window_t_s": [start_s, stop_s], "duration_s": round(float(tsec[-1]), 3),
-            "yaw_offset_deg": float(yaw_offset_deg), "imu_rate_hz": round((len(t) - 1) / max(tsec[-1], 1e-9), 2),
+            "imu_rate_hz": round((len(t) - 1) / max(tsec[-1], 1e-9), 2),
             "imu_samples": int(len(t)), "imu_max_gap_ms": round(float(dt.max() * 1e3), 1),
             "imu_median_dt_ms": round(float(np.median(dt) * 1e3), 2),
             "rest_check": rest_check(tsec, R, f, g=g)}
@@ -643,10 +643,7 @@ def integrate_imu(data: BagData, start_s: float, stop_s: float, mode: str = "res
     info["end_error_before_correction"] = err.round(4).tolist()
     info["implied_accel_bias"] = (err / tsec[-1]).round(5).tolist()
 
-    # body axes from the quaternion, optionally turned by the mounting yaw offset
-    th = np.radians(yaw_offset_deg)
-    Rz = np.array([[np.cos(th), -np.sin(th), 0.0], [np.sin(th), np.cos(th), 0.0], [0.0, 0.0, 1.0]])
-    Rb = R @ Rz
+    Rb = R                                               # body axes = the IMU's own axes
     to_body = lambda v: np.einsum("nji,nj->ni", Rb, v)  # noqa: E731  R^T v
     body, body_raw, acc_body = to_body(vel), to_body(vel_raw), to_body(a_w)
 
@@ -1084,135 +1081,12 @@ def write_csv(res: SyncResult, path: str | Path, meta: dict | None = None, sidec
 
 
 # --------------------------------------------------------------------------- #
-# Even re-timing: arrival-stamped topics (MAVROS with timesync off) -> evenly spaced stamps
+# Clocks
 # --------------------------------------------------------------------------- #
-RETIME_DEFAULT = ("imu/data", "bluerov/imu", "bluerov/depth")   # series whose name ends with one of these
-RETIME_ENVELOPE_PCT = 1.0      # the new stamps follow the earliest 1 % of arrivals (arrivals are only ever late)
-RETIME_CHUNK_S = 2.0           # length of the pieces checked for dropped messages
-RETIME_MAX_STEP = 0.5          # refuse if the earliest arrivals wander by more than this x the period
+CLOCK_TOPICS = ("imu/data", "global_position/local")   # series (name ending) listed in the clock report
 
 
-def retime_check(t_ns: np.ndarray) -> dict:
-    """
-    Fit evenly spaced stamps to a topic stamped on ARRIVAL (bunched by the link):
-        new_k = t_first + offset + k * period         k = 0, 1, 2 ... in arrival order
-    period and offset come from a straight-line fit through all stamps, then the line is moved
-    down to the earliest arrivals (RETIME_ENVELOPE_PCT), since a message can arrive late but
-    never early. That only holds if no message was dropped: one missing message shifts every
-    later index by one period. So the earliest-arrival level is compared piece by piece
-    (RETIME_CHUNK_S); if it wanders by more than RETIME_MAX_STEP x period, 'ok' is False.
-    Returns {'ok', 'reason', 'period_ms', 'rate_hz', 't_new' (if ok), 'shift_ms' stats ...}.
-    """
-    t = np.asarray(t_ns, np.int64)
-    n = len(t)
-    if n < 20:
-        return {"ok": False, "reason": f"only {n} messages"}
-    k = np.arange(n, dtype=float)
-    ts = (t - t[0]) / 1e9
-    dt_s = np.diff(ts)
-    drops = []
-    # A dropped message makes every later message look one period later than its index says, so
-    # the earliest-arrival level (the "floor": the least-delayed messages) steps up by one period.
-    # Windows of RETIME_CHUNK_S / 2 always hold some least-delayed messages, so their floors are
-    # reliable. Where the floor steps up, the slot goes right after the last message that is still
-    # on the lower floor: a message can arrive late, but never before it was measured.
-    period0 = float(np.median(dt_s[dt_s > 0])) if np.any(dt_s > 0) else 0.0
-    b = (ts[-1] / (n - 1)) if n > 1 else period0
-    W = max(20, int(round(RETIME_CHUNK_S / 2 / b))) if b > 0 else 20
-    for _ in range(100):
-        b, a = np.polyfit(k, ts, 1)                # ts ≈ a + b k
-        if b <= 0:
-            return {"ok": False, "reason": "stamps do not increase"}
-        r = ts - (a + b * k)
-        nw = n // W
-        if nw < 2:
-            break
-        bounds = [(i * W, (i + 1) * W if i < nw - 1 else n) for i in range(nw)]
-        floors = np.array([r[s0:s1].min() for s0, s1 in bounds])
-        step = np.diff(floors)
-        j = int(np.argmax(step))
-        m = int(round(step[j] / b))
-        if step[j] < 0.6 * b or m < 1:
-            break
-        lo, hi = bounds[j][0], bounds[j + 1][1]
-        low = np.flatnonzero(r[lo:hi] < floors[j] + 0.5 * b)
-        split = lo + int(low.max()) + 1 if len(low) else bounds[j + 1][0]
-        if split >= n:
-            break
-        k[split:] += m
-        drops.append({"before_message": int(split), "t_s": round(float(ts[split]), 3), "missing": m})
-    b, a = np.polyfit(k, ts, 1)
-    r = ts - (a + b * k)
-    base = float(np.percentile(r, RETIME_ENVELOPE_PCT))
-    span = ts[-1]
-    nch = max(1, int(span // RETIME_CHUNK_S))
-    floors = [float(np.percentile(c, RETIME_ENVELOPE_PCT * 5)) for c in np.array_split(r, nch) if len(c) >= 10]
-    wander = (max(floors) - min(floors)) if floors else 0.0
-    t_new = t[0] + np.round((a + base + b * k) * 1e9).astype(np.int64)
-    shift = (t_new - t) / 1e6                       # ms, new - old (mostly negative: arrivals were late)
-    dt_old = np.diff(t) / 1e6
-    out = {"period_ms": round(b * 1e3, 4), "rate_hz": round(1.0 / b, 3), "messages": n,
-           "dropped": int(sum(d["missing"] for d in drops)), "drops": drops[:50],
-           "earliest_arrival_wander_ms": round(wander * 1e3, 2),
-           "old_spacing_ms": {"median": round(float(np.median(dt_old)), 2),
-                              "p10": round(float(np.percentile(dt_old, 10)), 2),
-                              "p90": round(float(np.percentile(dt_old, 90)), 2),
-                              "max": round(float(dt_old.max()), 2)},
-           "shift_ms": {"median": round(float(np.median(shift)), 2),
-                        "p5": round(float(np.percentile(shift, 5)), 2),
-                        "min": round(float(shift.min()), 2), "max": round(float(shift.max()), 2)}}
-    if wander > RETIME_MAX_STEP * b:
-        out.update(ok=False, reason=(f"the earliest arrivals wander by {wander * 1e3:.1f} ms "
-                                     f"(> {RETIME_MAX_STEP:g} x the {b * 1e3:.2f} ms period): messages were "
-                                     "dropped in a way that couldn't be located, so evenly spaced stamps "
-                                     "would slide out of place"))
-        return out
-    out.update(ok=True, reason="", t_new=t_new)
-    return out
-
-
-def retime_series(data: BagData, patterns=RETIME_DEFAULT) -> list[dict]:
-    """Give every recorded series whose name ends with one of `patterns` evenly spaced stamps
-    (see retime_check), in place. A series that fails the check is left unchanged. Run it right
-    after load_bag, before anything is derived or synced. Returns one report per series."""
-    reports = []
-    for s in list(data.series.values()):
-        if s.msgtype == "derived" or not any(s.name.rstrip("/").endswith(p) for p in patterns):
-            continue
-        chk = retime_check(s.t)
-        rep = {"series": s.short, "time_source": s.time_source,
-               **{k: v for k, v in chk.items() if k != "t_new"}}
-        if chk["ok"]:
-            s.t = chk["t_new"]
-            s.info["retimed"] = {k: v for k, v in rep.items() if k not in ("series",)}
-            rep["applied"] = True
-        else:
-            rep["applied"] = False
-        reports.append(rep)
-    return reports
-
-
-def retime_text(reports: list[dict]) -> str:
-    lines = []
-    for r in reports:
-        if r.get("applied"):
-            sm = r["shift_ms"]
-            dr = r.get("dropped", 0)
-            lines.append(f"{r['series']}: re-timed to an even {r['period_ms']:.3f} ms ({r['rate_hz']:.2f} Hz), "
-                         f"{r['messages']} msgs, "
-                         + (f"{dr} dropped (left as empty slots, at t = "
-                            + ", ".join(f"{x['t_s']:.2f}" for x in r.get("drops", [])[:8])
-                            + (" ..." if len(r.get("drops", [])) > 8 else "") + " s after its first message)"
-                            if dr else "none dropped") + f". Old spacing median {r['old_spacing_ms']['median']} ms, "
-                         f"10-90 % {r['old_spacing_ms']['p10']}-{r['old_spacing_ms']['p90']} ms, max "
-                         f"{r['old_spacing_ms']['max']} ms. Stamps moved by median {sm['median']:+.1f} ms "
-                         f"(range {sm['min']:+.1f} to {sm['max']:+.1f} ms).")
-        else:
-            lines.append(f"{r['series']}: NOT re-timed - {r['reason']}")
-    return "\n".join(lines) if lines else "no IMU or depth topic to re-time"
-
-
-def clock_report(data: BagData, patterns=RETIME_DEFAULT) -> str:
+def clock_report(data: BagData, patterns=CLOCK_TOPICS) -> str:
     """Which clock the camera, IMU and depth stamps are on, and any clock warnings."""
     fi = data.meta.get("frame_info", {})
     ck = data.meta.get("clock") or {}
@@ -1229,7 +1103,8 @@ def clock_report(data: BagData, patterns=RETIME_DEFAULT) -> str:
                                        "through the recorder's receive times",
                    "receive": "no header - recorder receive time",
                    "receive-mapped": "no header - recorder receive time mapped onto the camera's clock",
-                   "receive-corrected": "no header - receive time shifted back by a sibling topic's delay"
+                   "receive-corrected": "no header - receive time shifted back by a sibling topic's delay",
+                   "autopilot": "the autopilot's own sample times (MAVLink), on the camera's clock"
                    }.get(s.time_source, s.time_source)
             lines.append(f"{s.short}: {src}")
     for w in data.meta.get("warnings", []):
@@ -1247,10 +1122,13 @@ def short_name_(name: str) -> str:
 # tag_to_imu_format: a compact, fixed-order CSV for tag -> IMU work
 # --------------------------------------------------------------------------- #
 TAG_IMU_FORMAT = "tag_to_imu_format"
-TAG_IMU_IMU_FIELDS = ([f"linear_acceleration.{a}" for a in "xyz"] + [f"angular_velocity.{a}" for a in "xyz"]
-                      + [f"orientation.{a}" for a in "xyzw"])
+TAG_IMU_ACC_FIELDS = [f"linear_acceleration.{a}" for a in "xyz"]
+TAG_IMU_GYRO_FIELDS = [f"angular_velocity.{a}" for a in "xyz"]
+TAG_IMU_IMU_FIELDS = TAG_IMU_ACC_FIELDS + TAG_IMU_GYRO_FIELDS
 TAG_IMU_TF_FIELDS = [f"translation_mm.{a}" for a in "xyz"] + [f"rotation.{a}" for a in "xyzw"]
-DEPTH_PREFER = ("bluerov/depth", "bluerov2/depth", "/depth")
+# Depth for the export: MAVROS's global_position/local z (metres, NEGATIVE underwater). It has a header
+# (MAVROS's stamp of its GLOBAL_POSITION_INT), so autopilot timing pairs it exactly.
+DEPTH_TOPIC, DEPTH_COL = "global_position/local", "pose.pose.position.z"
 
 
 def _tag_sort_key(child: str):
@@ -1265,8 +1143,10 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
       1. every live tag's deviation from its zero frame, derived/tf[tag_N_zero->tag_N], sorted by
          tag number: translation_mm.x/y/z (mm, along the zero frame's axes) and rotation.x/y/z/w
          (quaternion; identity = on the zero pose). Tags without a zero frame are left out.
-      2. the IMU (imu/data): linear_acceleration.x/y/z, angular_velocity.x/y/z, orientation.x/y/z/w
-      3. the depth topic (bluerov/depth; falls back to global_position/rel_alt if there is none)
+         Each tag is followed by <tag>.seen: 1 if detected in that frame, else 0.
+      2. the IMU (imu/data), as recorded: linear_acceleration.x/y/z (m/s², gravity included, so it
+         needs no attitude estimate) and angular_velocity.x/y/z (rad/s). No orientation.
+      3. depth: global_position/local pose.pose.position.z (metres, negative underwater)
     Returns ([(series_name, column)], notes).
     """
     notes: list[str] = []
@@ -1296,30 +1176,18 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
 
     imu = _find_series(data, TAG_IMU_IMU_FIELDS, prefer=("/imu/data",))
     if imu is None:
-        notes.append("no IMU topic with linear_acceleration, angular_velocity and orientation found")
+        notes.append("no IMU topic with linear_acceleration and angular_velocity found")
     else:
         cols += [(imu.name, c) for c in TAG_IMU_IMU_FIELDS]
-        notes.append(f"IMU: {imu.short}")
+        notes.append(f"IMU: {imu.short} (acceleration with gravity, gyro)")
 
     recorded = [s for s in data.series.values() if s.msgtype != "derived" and s.info.get("kind") == "topic"]
-    depth = None
-    for p in DEPTH_PREFER:
-        depth = next((s for s in recorded if p in s.name.lower()), None)
-        if depth:
-            break
+    depth = next((s for s in recorded if s.name.rstrip("/").endswith(DEPTH_TOPIC) and DEPTH_COL in s.cols), None)
     if depth is None:
-        depth = next((s for s in recorded if "depth" in s.name.lower()), None)
-    if depth is None:
-        depth = next((s for s in recorded if s.name.endswith("rel_alt")), None)
-        if depth is not None:
-            notes.append(f"no bluerov/depth topic in this bag - used {depth.short} instead")
-    if depth is None:
-        notes.append("no depth topic found")
+        notes.append(f"no {DEPTH_TOPIC} topic in this bag, so no depth column")
     else:
-        dcols = [c for c in depth.cols if depth.kinds.get(c) == "float"]
-        dcols = [c for c in dcols if c in ("data", "depth")] or dcols[:1]
-        cols += [(depth.name, c) for c in dcols]
-        notes.append(f"depth: {depth.short}.{', '.join(dcols)}")
+        cols.append((depth.name, DEPTH_COL))
+        notes.append(f"depth: {depth.short}.{DEPTH_COL} (negative underwater)")
     return cols, notes
 
 
@@ -1330,14 +1198,24 @@ def tag_to_imu_sync(data: BagData, start_s=None, stop_s=None, gap_factor: float 
     if not wanted:
         raise RuntimeError("Nothing to export in tag_to_imu_format: " + "; ".join(notes))
     res = sync(data, start_s, stop_s, wanted, gap_factor, rate)
+    full = [f"{data.series[n].short}.{c}" for n, c in wanted]
     by_name = {n: i for i, n in enumerate(res.names)}
-    order = [by_name[f"{data.series[n].short}.{c}"] for n, c in wanted if f"{data.series[n].short}.{c}" in by_name]
+    order = [by_name[n] for n in full if n in by_name]
     out = SyncResult(t=res.t, t0=res.t0, frame_idx=res.frame_idx, notes=res.notes)
     for i in order:
         out.names.append(res.names[i])
         out.kinds.append(res.kinds[i])
         out.modes.append(res.modes[i])
         out.values.append(res.values[i])
+        # after each tag's last column: <tag>.seen = 1 if the tag was detected in this frame, else 0
+        name = res.names[i]
+        if name.endswith(f".{TAG_IMU_TF_FIELDS[-1]}") and name.startswith("derived/tf["):
+            tag = name[: -len(TAG_IMU_TF_FIELDS[-1]) - 1]
+            pos = res.values[by_name[f"{tag}.translation_mm.x"]]
+            out.names.append(f"{tag}.seen")
+            out.kinds.append("int")
+            out.modes.append("detected")
+            out.values.append(np.isfinite(pos).astype(float))
     return out, notes
 
 
@@ -1553,9 +1431,6 @@ def imu_selftest(fn=None, cases=IMU_TEST_CASES, verbose=True):
                "surge_min": float(np.min(surge)), "travel_angle": ser.info.get("travel_angle_deg"),
                "arch": (ser.info.get("rest_check") or {}).get("arch_estimate_m_s"),
                "still": ser.info.get("start_still")}
-        if "mounted" in name and ser.info.get("travel_angle_deg") is not None:
-            fixed = fn(bag, 0.0, (t_ns[-1] - t_ns[0]) / 1e9, "rest", yaw_offset_deg=ser.info["travel_angle_deg"])
-            row["sway_peak_after_offset"] = float(np.max(np.abs(fixed.cols["sway"])))
         rows.append(row)
     if verbose:
         print(f"{'simulated case (true sway = 0, surge >= 0)':44s} {'surge RMS err':>13s} {'min surge':>10s} "
@@ -1567,8 +1442,6 @@ def imu_selftest(fn=None, cases=IMU_TEST_CASES, verbose=True):
                   f"{r['dist_err_pct']:+10.1f} % {ta:>10s} {sw:>15s}")
             if r.get("still") is False:
                 print("   ^ flagged: Start was not still, so the gyro offset wasn't measured there")
-            if "sway_peak_after_offset" in r:
-                print(f"{'   ... with yaw offset = travel angle':44s} {'':13s} {'':10s} {r['sway_peak_after_offset']:8.3f} m/s")
     return rows
 
 
@@ -1591,8 +1464,6 @@ def main(argv=None):
                     help="add IMU-integrated velocity over the window (columns derived/imu_vel.*). "
                          "'rest' (default): ROV still at --start and --stop. "
                          "'odom': anchor to global_position/local velocity (needs GPS/DVL)")
-    ap.add_argument("--imu-yaw-offset", type=float, default=0.0, metavar="DEG",
-                    help="IMU mounted this many degrees left of the hull's nose (turns surge/sway axes)")
     ap.add_argument("--thrusters", default=",".join(map(str, HORIZONTAL_CHANNELS)),
                     help="rc/out channels of the horizontal thrusters for derived/forward_motion_diag (default 0,1,2,3)")
     ap.add_argument("--tf", nargs="*", metavar="A:B", default=[],
@@ -1602,12 +1473,12 @@ def main(argv=None):
                          "series containing these words (e.g. tag_18). No smoothing is applied.")
     ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT), default="standard",
                     help=f"'{TAG_IMU_FORMAT}': time since the export's start (0 = --start), dt between camera "
-                         "frames, then each tag's deviation from its zero frame (translation + quaternion), the IMU (linear_acceleration, angular_velocity, orientation), and the "
-                         "depth topic last. Ignores --topics and --integrate-imu.")
-    ap.add_argument("--retime", action="store_true",
-                    help="give the IMU and depth topics evenly spaced stamps before syncing (for topics stamped "
-                         "on arrival, e.g. MAVROS with timesync off). Dropped messages are located and left as "
-                         "empty slots; if the timing can't be lined up, that topic is left as recorded.")
+                         "frames, then each tag's deviation from its zero frame (translation + quaternion) and a "
+                         "seen flag, the IMU (linear_acceleration with gravity, angular_velocity), and the "
+                         "depth topic last. No orientation. Ignores --topics and --integrate-imu.")
+    ap.add_argument("--fcu-time", action="store_true",
+                    help="give MAVROS topics the autopilot's own sample times, decoded from the recorded raw "
+                         "MAVLink stream (.../mavlink_source). Topics it can't do are left as recorded.")
     ap.add_argument("--sidecar", action="store_true", help="also write <csv>.sync.json with the settings used")
     ap.add_argument("--rebuild", action="store_true", help="ignore the cache and re-read the bag")
     ap.add_argument("--selftest-imu", action="store_true",
@@ -1624,11 +1495,11 @@ def main(argv=None):
     data = load_bag(a.bag, camera_topic=a.camera, progress=_cli_progress, rebuild=a.rebuild,
                     msg_dir=a.msg_dir, include_covariance=a.include_covariance)
     print(f"Loaded in {time.time() - t_load:.1f} s")
+    fcu_reports = []
+    if a.fcu_time:
+        fcu_reports = fcu_time_series(data, a.msg_dir, _cli_progress)
+        print("Autopilot timing:\n  " + fcu_text(fcu_reports).replace("\n", "\n  "))
     print("Clocks:\n  " + clock_report(data).replace("\n", "\n  "))
-    retime_reports = []
-    if a.retime:
-        retime_reports = retime_series(data)
-        print("Even re-timing:\n  " + retime_text(retime_reports).replace("\n", "\n  "))
     tf_ser, tf_notes = tf_tree_series(data)
     for s_ in tf_ser:
         data.series[s_.name] = s_
@@ -1666,7 +1537,7 @@ def main(argv=None):
     if a.integrate_imu:
         lo = a.start if a.start is not None else 0.0
         hi = a.stop if a.stop is not None else float(data.rel(data.frame_t[-1])) if data.n_frames else 1e9
-        s_int = integrate_imu(data, lo, hi, a.integrate_imu, yaw_offset_deg=a.imu_yaw_offset)
+        s_int = integrate_imu(data, lo, hi, a.integrate_imu)
         if s_int is None:
             print("Could not integrate the IMU (no IMU with orientation + linear_acceleration in the window,"
                   " or no odometry for 'odom' mode); skipping.")
@@ -1682,7 +1553,7 @@ def main(argv=None):
         out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_{TAG_IMU_FORMAT}.csv"
         write_tag_to_imu_csv(data, res, out, a.rate, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
                                                       "gap_factor": a.gap_factor, "notes": notes,
-                                                      "retimed": retime_reports},
+                                                      "autopilot_timed": fcu_reports},
                              sidecar=a.sidecar)
         print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 2} columns, {TAG_IMU_FORMAT})")
         for n in notes:
@@ -1709,7 +1580,7 @@ def main(argv=None):
     out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_synced.csv"
     write_csv(res, out, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
                          "gap_factor": a.gap_factor, "fixed_rate_hz": a.rate,
-                         "warnings": data.meta.get("warnings", []), "retimed": retime_reports},
+                         "warnings": data.meta.get("warnings", []), "autopilot_timed": fcu_reports},
               sidecar=a.sidecar)
     blanks = sum(int(np.sum(v != v)) if v.dtype != object else 0 for v in res.values)
     print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 3} columns, "

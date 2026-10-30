@@ -105,7 +105,7 @@ The IMU measures acceleration, so velocity comes from integrating it, and any sm
 
 On the whole sub5 run (window 1.0–52.4 s, still before the thrusters engage, stopped at the end): forward distance +18.2 m against about 22 m. Sway is still too large (+68 m, peak 3 m/s): while the thrusters run, the accelerometer reads an extra +0.2 to +0.3 m/s² sideways that vanishes at rest. That can't be real motion and isn't removable from the IMU alone; most likely thruster vibration, or a roll error that comes and goes during the ±35° pitching.
 
-**Travel angle and IMU yaw offset.** `travel angle` (in the IMU window and the status bar) is the direction actually travelled relative to the IMU's nose, + = left: `atan2(sway distance, surge distance)`. An IMU or autopilot mounted a few degrees off the hull's nose turns part of surge into sway, sway = surge × sin(offset), which no bias correction can remove. If the travel angle is about the same on every straight run, that's the mounting offset: enter it as **IMU yaw offset**, or click **Set from travel angle** on a run you know was straight. If it changes from run to run, it's real sideways drift (current) or an attitude error, not mounting. From the command line, use `--imu-yaw-offset DEG`.
+**Travel angle.** `travel angle` (in the IMU window and the status bar) is the direction actually travelled relative to the IMU's nose, + = left: `atan2(sway distance, surge distance)`. It is a diagnostic only: surge and sway are always along the IMU's own axes and are never rotated to make a run look straight (runs with turns would be wrong).
 
 **Checking the maths.** `python sync_export.py --selftest-imu` runs the integration on simulated runs where the true surge is known and the true sway is 0 (straight, ±25° pitching, waves, rocking during Start, a 90° turn, gyro offsets, accelerometer bias and noise, an 8° mounting offset, autopilot attitude errors that are no longer used, a thrust-linked error) and prints the errors.
 
@@ -129,7 +129,7 @@ On the whole sub5 run (window 1.0–52.4 s, still before the thrusters engage, s
 | `forward_speed` | Speed along the ROV's heading (horizontal), m/s, + = ahead |
 | `sideways_speed`, `vertical_speed` | Across the heading (+ left) and up/down (+ up), m/s |
 | `forward_speed_raw` | Forward speed before drift correction |
-| `surge`, `sway`, `heave` | Velocity along the IMU's own axes, from the IMU-only attitude (forward along the nose, + left, + up), turned by the IMU yaw offset if set, m/s. These tilt with the ROV. `surge_raw`… are before drift correction; `acc_surge`… are accelerations. |
+| `surge`, `sway`, `heave` | Velocity along the IMU's own axes, from the IMU-only attitude (forward along the nose, + left, + up), m/s. These tilt with the ROV. `surge_raw`… are before drift correction; `acc_surge`… are accelerations. |
 | `surge_distance`, `sway_distance` | Integral of surge / sway since Start, m |
 | `forward_distance` | Distance along the heading since Start, m |
 | `speed` | Horizontal speed, m/s |
@@ -248,31 +248,33 @@ The third choice in the export dropdown (or `--format tag_to_imu_format` on the 
 | `t_s` | Seconds since the export's first row: **Start is 0**, whatever the window (a window from 9.97 s starts at 0.000). The sidecar `.json` records where that 0 falls on the viewer's time axis (`t_s_zero_in_bag_s`) |
 | `dt_s` | Seconds since the previous camera frame in the bag (a dropped frame shows as about 2× the usual value; blank only for the bag's very first frame) |
 | `derived/tf[tag_N_zero->tag_N].translation_mm.x/y/z`, `.rotation.x/y/z/w` | Each live tag's deviation from its zero frame (see **TF tree**): mm along the zero frame's axes, and a quaternion that is (0, 0, 0, 1) on the zero pose. Sorted by tag number. Tags without a zero frame are left out and listed in the status bar. Blank when the tag wasn't detected in that frame |
-| `…imu/data.linear_acceleration.x/y/z`, `.angular_velocity.x/y/z`, `.orientation.x/y/z/w` | The IMU, interpolated to the frame time (orientation by SLERP) |
-| `bluerov/depth.data` | The depth topic, last. If the bag has no `bluerov/depth`, it falls back to `global_position/rel_alt` and says so |
+| `derived/tf[tag_N_zero->tag_N].seen` | After each tag's rotation columns: 1 when the tag was detected in that frame, 0 when it wasn't |
+| `…imu/data.linear_acceleration.x/y/z` | The accelerometer as recorded, m/s², **gravity included** (≈ +9.8 on z when level and still). No attitude estimate is involved, so nothing can shift it between test days |
+| `…imu/data.angular_velocity.x/y/z` | The gyro, rad/s |
+| `…global_position/local.pose.pose.position.z` | Depth, last, metres, **negative underwater** (MAVROS's up-positive axis). Published by MAVROS with a header (its stamp of the `GLOBAL_POSITION_INT` it came from), so **Autopilot timing** pairs it exactly |
 
-There are no `timestamp`/`frame_idx` columns. Tick **Save .json notes** to record the first absolute timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
+The IMU columns are interpolated to each frame's time. There are no orientation columns and no `timestamp`/`frame_idx` columns. Tick **Save .json notes** to record the first absolute timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
 
 ```bash
 python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format -o run1_tag_imu.csv
 ```
 
-### Even IMU timing (topics stamped on arrival)
+### Autopilot timing (exact sample times from the MAVLink stream)
 
-When MAVROS timesync is off (`timesync_mode = NONE`, as in `bluerov_sensor_node.py`), every MAVROS message is stamped with the Jetson's clock **when it arrives**, not when it was measured. The link delivers readings in bursts, so the stamps bunch up: on sub1 the IMU is exactly 100 Hz overall, but 24 % of its spacings are under 2 ms and 12 % are 20–40 ms pauses. Readings are then matched to the wrong camera frame by up to a few tens of ms, and the pauses show up as blank cells.
+With MAVROS timesync not locked, every MAVROS message is stamped with the Jetson's clock **when it arrives**, not when it was measured. The link delivers readings in bursts, so the stamps bunch up: on sub1 the IMU is exactly 100 Hz overall, but 24 % of its spacings are under 2 ms and 12 % are 20–40 ms pauses. Readings are then matched to the wrong camera frame by up to a few tens of ms, and the pauses show up as blank cells.
 
-Tick **Even IMU timing** (in *Calculations*), or pass `--retime`, to give the IMU (`imu/data`, `bluerov/imu`) and depth (`bluerov/depth`) topics evenly spaced stamps before anything is plotted, integrated or exported:
+The raw MAVLink stream (`/uas1/mavlink_source`, recorded by MAVROS) still carries the autopilot's own sample time in almost every message (`time_boot_ms` in `ATTITUDE`, `GLOBAL_POSITION_INT`, `SCALED_PRESSURE`, ...; `time_usec` in `RAW_IMU`, ...). Tick **Autopilot timing** (in *Calculations*), or pass `--fcu-time`, to use it:
 
-- The readings keep their order. A straight line `start + n × period` is fitted through the recorded stamps and moved down onto the earliest arrivals, because a reading can arrive late but never early. The new stamps stay on the camera's clock.
-- **Dropped readings** show up as a one-period step in the earliest arrivals; each one found gets an empty slot. If the timing still can't be lined up (many drops, or a clock jump), that topic is left exactly as recorded and the reason is given.
-- What remains is the link's smallest delay (a few ms, the same for every reading). On a simulated bursty recording the timing error went from about 17 ms to about 3–4 ms, most of it that constant delay.
-- **Bag info** lists which clock the camera, IMU and depth stamps are on (`Clocks:`) and what the re-timing did (period, drops found, how far stamps moved). The `.json` notes record it too. The bag itself is never changed; untick the box to go back to the recorded stamps.
+- **Clock offset from the fastest arrivals.** For each MAVLink message type, arrival − autopilot time is taken at its smallest in every 5 s block, and a straight line through those minimums gives the offset (it follows the slow drift between the autopilot's and the Jetson's clocks; an autopilot reboot starts a new line). Corrected time = autopilot time + offset, then mapped onto the camera's clock like any other topic.
+- **Every MAVROS topic with a timestamped source** is re-stamped: `imu/data` from `ATTITUDE`; `imu/data_raw` from `RAW_IMU`; `static_pressure` from `SCALED_PRESSURE`; `global_position/local`, `rel_alt`, `compass_hdg` from `GLOBAL_POSITION_INT`; `rc/in`, `rc/out` from `RC_CHANNELS` / `SERVO_OUTPUT_RAW`. The list is `TOPIC_SOURCES` in `fcutime.py`.
+- **Pairing.** Each MAVROS message is paired with the MAVLink message it came from: by header stamp, or by the recorder's arrival time for topics without a header (`rel_alt`, `compass_hdg`). Where a value is copied straight from the MAVLink message (`rel_alt` = `relative_alt`, heading = `hdg`, roll rate = `rollspeed`) it must match exactly, so a lost message on either side can't shift the pairing.
+- **Left as recorded:** topics whose MAVLink message has no timestamp (`state` = `HEARTBEAT`, battery, `vfr_hud`), and any topic where under 90 % of messages pair up. Messages that can't be paired are dropped from that topic (they would otherwise sit at a wrong time).
+- **What remains** is the link's smallest delay, a few ms, the same for every topic.
+- **Bag info** lists which clock the camera, IMU and depth are on (`Clocks:`) and, for each topic, which MAVLink message it was paired with, how many paired, how far stamps moved, the link delay and the clock drift. The `.json` notes record it too. The first run reads the bag (a few seconds); the result is cached. The bag itself is never changed; untick the box to go back to the recorded stamps.
 
-```bash
-python sync_export.py BAG --start 4.2 --stop 21.75 --retime --format tag_to_imu_format -o run1.csv
-```
+On a simulated bag with bursty delivery, stalls and lost messages (autopilot clock 30 ppm off), recorded stamps were off by 9 ms (typical) and over 40 ms (worst 1 %); with autopilot timing every topic was within 0.3 ms (the 1 ms resolution of `time_boot_ms`), plus the constant smallest delay.
 
-For new recordings, MAVROS timesync (`timesync_mode = MAVLINK`) stamps each message with the autopilot's measurement time, converted to the ROS clock, which removes the bunching at the source.
+**`bluerov` topics are ignored.** Everything under `/bluerov/` (the `bluerov_sensor_node.py` relays) is skipped when the bag is read, and listed under *Skipped* in **Bag info**; the MAVROS topics they relay are used instead (`IGNORED_NAMESPACES` in `bagcache.py`).
 
 ### Things to check on the real bag
 
@@ -306,6 +308,7 @@ For new recordings, MAVROS timesync (`timesync_mode = MAVLINK`) stamps each mess
 | `bag_viewer.py` | The GUI |
 | `clock_check.py` | Checks whether the camera and IMU are stamped on the same clock (helper script) |
 | `imu_timing.py` | Shows how evenly the IMU is stamped: rate, spacing, bursts (helper script) |
+| `fcutime.py` | Autopilot timing: re-stamps MAVROS topics with the autopilot's sample times from the recorded MAVLink stream |
 | `lag_check.py` | Estimates the tag-to-IMU timing offset from a `tag_to_imu_format` CSV (helper script) |
 
 ## Timing helper scripts
@@ -319,13 +322,13 @@ python lag_check.py run.csv    # timing offset between tags and IMU, separated f
 ```
 
 - **`clock_check.py`** fits each topic's header stamps against the recorder's times and compares camera and IMU. It reports the rate difference, the offset in ms and a verdict. On sub1_tagged it found the camera on time-since-boot and the IMU on Unix time: different clocks, same rate. bagsync already maps one onto the other.
-- **`imu_timing.py`** on sub1_tagged: 100.0 Hz, but 24 % of spacings under 2 ms and 12 % at 20–40 ms. That is arrival-time bunching, which **Even IMU timing** / `--retime` fixes.
+- **`imu_timing.py`** on sub1_tagged: 100.0 Hz, but 24 % of spacings under 2 ms and 12 % at 20–40 ms. That is arrival-time bunching, which **Autopilot timing** / `--fcu-time` fixes.
 - **`lag_check.py`** compares each tag with the IMU's acceleration frequency by frequency, and fits one shared timing offset plus a spring model of each tag's bending. It reports the offset with a jackknife uncertainty and a table of each tag's shift by frequency band. It checks its own fit, and when the tags don't behave like simple springs (as on sub1, where they trail by 150–350 ms at 0.3–1 Hz but lead by 10–20 ms at 4–8 Hz) it prints **NO RELIABLE OFFSET** instead of a number. On simulated recordings with known offsets it came within 1–2 ms. A tap test, or a recording with both sensors on ROS time, gives the offset directly.
 
-**Recommended export for training** from bags recorded before the clock fixes:
+**Recommended export for training:**
 
 ```bash
-python sync_export.py BAG --retime --gap-factor 10 --format tag_to_imu_format -o run.csv
+python sync_export.py BAG --fcu-time --gap-factor 10 --format tag_to_imu_format -o run.csv
 ```
 
-Check that the output says the IMU and depth were "re-timed" (not "NOT re-timed"). Export every bag the same way. A small fixed offset of a frame or two can remain; a model that sees a few frames of context learns it, as long as live data has the same timing.
+Check that the output says `mavros/imu/data` and `mavros/global_position/local` got "autopilot sample times". Export every bag the same way. A small fixed offset of a frame or two can remain; a model that sees a few frames of context learns it, as long as live data has the same timing.

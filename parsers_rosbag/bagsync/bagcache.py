@@ -51,12 +51,15 @@ from rosbags.interfaces import MessageDefinitionFormat
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_idl, get_types_from_msg, get_typestore
 
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 VERSION = "bagsync v11"
 CACHE_DIRNAME = ".bagsync_cache"
 HEADER_SANITY_S = 5.0        # max |receive - header| before falling back to receive time
 MAX_ARRAY_ELEMS = 64         # numeric arrays longer than this are skipped (blobs)
 DEFAULT_THUMB_WIDTH = 960
+# Topics under these namespaces are not read at all (bluerov_sensor_node.py relays of MAVROS topics;
+# everything is taken from MAVROS directly). Listed under "Skipped" in Bag info.
+IGNORED_NAMESPACES = ("bluerov",)
 
 # Fallback definitions for non-standard types used by this bag, in case the
 # bag was recorded without embedded message definitions.  Definitions embedded
@@ -770,6 +773,9 @@ def _build_cache(bag_dir, fp, camera_topic, progress, msg_dir, include_cov, thum
 
         usable = []
         for c in conns:
+            if c.topic.strip("/").split("/")[0] in IGNORED_NAMESPACES:
+                skipped[c.topic] = "ignored (bluerov_sensor_node topic; the MAVROS topic it relays is used)"
+                continue
             if c.msgtype not in store.fielddefs:
                 skipped[c.topic] = (f"type {c.msgtype} unknown (no embedded definition) - "
                                     "pass --msg-dir with its .msg files")

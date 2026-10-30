@@ -64,12 +64,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "surface_pressure", default_value="0.0",
             description="Surface reference pressure in Pa (0 = auto-zero at startup)"),
+        # Timesync is disabled: the tether link latency is too high and variable,
+        # so its clock-offset estimate drifted and made measurement stamps less
+        # accurate than stamping on arrival. Set false to re-enable.
         DeclareLaunchArgument(
-            "disable_timesync", default_value="false",
+            "disable_timesync", default_value="true",
             description="Turn off MAVROS timesync (data then stamped on arrival, not when measured)"),
         DeclareLaunchArgument(
             "latency_period", default_value="1.0",
-            description="Seconds between /MAVROS_latency probes (0 = off)"),
+            description="Seconds between link latency probes, shown in [STATUS] (0 = off)"),
     ]
 
     # ------------------------------------------------------------------

@@ -2,53 +2,30 @@
 """
 BlueROV2 MAVROS Sensor Node  —  ROS 2 Humble / ArduSub
 -------------------------------------------------------
-Relays MAVROS topics to /bluerov/*, computes attitude (roll/pitch/yaw),
-heading and depth, requests MAVLink stream rates once connected, and
-prints a periodic status report showing which topics are actually live.
+Watches the MAVROS topics, requests MAVLink stream rates once connected,
+measures link latency, and prints a periodic status report (attitude,
+heading, depth, battery) showing which topics are actually live.
+Consumers should subscribe to the MAVROS topics directly.
+
+Depth:
+  Read depth from pose.pose.position.z of <vehicle_ns>/global_position/local
+  (nav_msgs/Odometry, e.g. /mavros/mavros/global_position/local). It is ENU,
+  so z is negative underwater: depth = -z. The header stamp is the
+  GLOBAL_POSITION_INT it came from.
 
 Timing:
-  * MAVROS timesync (timesync_mode = MAVLINK) is left on, so messages that
-    carry an autopilot timestamp (ATTITUDE, RAW_IMU, SCALED_PRESSURE,
-    GLOBAL_POSITION_INT, ...) are stamped with the ROS time they were measured,
-    not the time they reached the Jetson. Stamps settle a few seconds after
-    connect while the clock offset converges. Messages without a timestamp
-    (battery, state) are still stamped on arrival.
-  * disable_timesync:=true switches timesync off (timesync_mode = NONE), so
-    everything is stamped on arrival instead.
-
-Depth stamps (/bluerov/depth_stamped):
-  * If MAVROS publishes global_position/local, its header is used: the exact
-    measurement time of the GLOBAL_POSITION_INT that carries the depth.
-  * Otherwise (it may be absent with no GPS), each rel_alt depth is stamped with
-    its arrival time minus the current link delay, measured from /imu/data
-    (arrival time - header stamp, minimum over the last second). Both messages
-    come over the same link at the same rate, so this is within a few ms.
-    The [STATUS] line shows which is in use (depth_stamp=measured|estimated).
+  * MAVROS timesync is switched off by default (disable_timesync = true,
+    timesync_mode = NONE), so all MAVROS data is stamped with Jetson time on
+    arrival, not when it was measured.
+  * Why: the tether link latency is too high and variable for timesync. Its
+    clock-offset estimate drifts with the round-trip delay, which made the
+    measurement stamps less accurate than plain arrival stamps.
+  * disable_timesync:=false turns it back on (stamps = measurement time).
   * Link latency is measured once a second by sending the autopilot a
     MAVLink REQUEST_MESSAGE through MAVROS and timing the COMMAND_ACK.
-    One-way latency (RTT / 2, ms) is published on /MAVROS_latency.
+    One-way latency (RTT / 2, ms) is shown in the [STATUS] line.
 
-Published:
-  /MAVROS_latency     std_msgs/Float64              (one-way link latency estimate, ms)
-  /bluerov/imu        sensor_msgs/Imu               (fast_rate_hz, default 100 Hz)
-  /bluerov/attitude   geometry_msgs/Vector3Stamped  (x=roll, y=pitch, z=yaw, degrees, ENU)
-  /bluerov/heading    std_msgs/Float64              (compass, degrees, 0 = north; no header,
-                                                     so only the arrival time is known)
-  /bluerov/heading_stamped geometry_msgs/Vector3Stamped (vector.z = compass heading, degrees,
-                                                     0 = north, from the IMU orientation;
-                                                     stamped when measured)
-  /bluerov/pressure   sensor_msgs/FluidPressure
-  /bluerov/depth      std_msgs/Float64              (metres, from rel_alt; positive = down;
-                                                     no header, so only the arrival time is known)
-  /bluerov/depth_stamped geometry_msgs/PointStamped (point.z = depth, metres, positive = down;
-                                                     stamped when measured, see "Depth stamps" below)
-  /bluerov/battery    sensor_msgs/BatteryState
-  /bluerov/gps        sensor_msgs/NavSatFix         (surface only)
-  /bluerov/rc_in      mavros_msgs/RCIn
-  /bluerov/rc_out     mavros_msgs/RCOut             (thruster/servo outputs)
-  /bluerov/state      mavros_msgs/State
-  /bluerov/altitude   mavros_msgs/Altitude
-  /bluerov/velocity   geometry_msgs/TwistStamped    (only with a DVL / position source)
+Publishes nothing; it only logs.
 
 Run directly:
     python3 bluerov_sensor_node.py
@@ -58,11 +35,9 @@ Or with parameters:
 
 import math
 import time
-from collections import deque
 
 import rclpy
 from rclpy.node import Node
-from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
@@ -70,7 +45,7 @@ from sensor_msgs.msg import Imu, FluidPressure, BatteryState, NavSatFix
 from mavros_msgs.msg import RCIn, RCOut, State, Altitude
 from mavros_msgs.srv import StreamRate, CommandLong, MessageInterval
 from std_msgs.msg import Float64
-from geometry_msgs.msg import TwistStamped, Vector3Stamped, PointStamped
+from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import ListParameters, SetParameters
 from rcl_interfaces.msg import Parameter, ParameterValue, ParameterType
@@ -84,27 +59,18 @@ SUB_QOS = QoSProfile(
     durability=DurabilityPolicy.VOLATILE,
 )
 
-PUB_QOS = QoSProfile(
-    history=HistoryPolicy.KEEP_LAST,
-    depth=10,
-    reliability=ReliabilityPolicy.RELIABLE,
-    durability=DurabilityPolicy.VOLATILE,
-)
-
 GRAVITY = 9.80665
 MAV_CMD_REQUEST_MESSAGE = 512
 MAVLINK_MSG_ID_SYSTEM_TIME = 2      # small message; cheap for the autopilot to send
 # Messages requested at fast_rate_hz:
-#   RAW_IMU, ATTITUDE    -> /bluerov/imu, /bluerov/attitude (ATTITUDE: orientation + angular
-#                           velocity, RAW_IMU: linear acceleration)
-#   SCALED_PRESSURE      -> /bluerov/pressure
-#   GLOBAL_POSITION_INT  -> /bluerov/heading (hdg) and /bluerov/depth, /bluerov/depth_stamped
-#                           (relative_alt)
+#   RAW_IMU, ATTITUDE    -> imu/data (ATTITUDE: orientation + angular velocity,
+#                           RAW_IMU: linear acceleration)
+#   SCALED_PRESSURE      -> imu/static_pressure
+#   GLOBAL_POSITION_INT  -> global_position/compass_hdg, global_position/rel_alt,
+#                           global_position/local (depth = -pose.pose.position.z)
 FAST_MESSAGE_IDS = {"RAW_IMU": 27, "SCALED_PRESSURE": 29, "ATTITUDE": 30,
                     "GLOBAL_POSITION_INT": 33}
 SURFACE_CAL_SAMPLES = 20            # ~1 s of static_pressure at 20 Hz
-IMU_DELAY_SAMPLES = 100             # ~1 s of imu/data at 100 Hz
-LOCAL_STALE_SEC = 1.0               # global_position/local older than this -> estimate depth stamps
 
 
 def quat_to_rpy_deg(q):
@@ -138,7 +104,8 @@ class BlueROVSensorNode(Node):
         self.declare_parameter("stream_rate_hz", 10)            # 0 = don't request
         self.declare_parameter("fast_rate_hz", 100.0)           # IMU/heading/depth/pressure rate; 0 = leave at stream rate
         self.declare_parameter("status_period", 5.0)            # seconds
-        self.declare_parameter("disable_timesync", False)       # True = stamp MAVROS data on arrival
+        # Timesync off by default: link latency is too high for it (see module docstring).
+        self.declare_parameter("disable_timesync", True)        # True = stamp MAVROS data on arrival
         self.declare_parameter("latency_period", 1.0)           # seconds between latency probes; 0 = off
         self.declare_parameter("latency_timeout", 2.0)          # seconds before a probe counts as lost
 
@@ -165,9 +132,6 @@ class BlueROVSensorNode(Node):
         self._streams_requested = False
         self._timesync_done = False
         self._p0_samples = [] if self._p0 <= 0.0 else None
-        self._imu_delays = deque(maxlen=IMU_DELAY_SAMPLES)  # arrival - stamp, seconds
-        self._imu_frame = ""
-        self._local_last = None           # monotonic time of last global_position/local
 
         # Latency probe state
         self._lat_pending = None          # (future, t0) while a probe is in flight
@@ -181,27 +145,21 @@ class BlueROVSensorNode(Node):
         # topic -> message count since last status report
         self._counts = {}
 
-        # ---------------- Relays ----------------
+        # ---------------- Watched MAVROS topics ----------------
         ns = self._ns
-        self._relay(Imu,           f"/{ns}/imu/data",                     "/bluerov/imu",      self._on_imu)
-        self._relay(FluidPressure, f"/{ns}/imu/static_pressure",          "/bluerov/pressure", self._on_pressure)
-        self._relay(Float64,       f"/{ns}/global_position/rel_alt",      None,                self._on_rel_alt)
-        self._relay(Odometry,      f"/{ns}/global_position/local",        None,                self._on_local)
-        self._relay(Float64,       f"/{ns}/global_position/compass_hdg",  "/bluerov/heading",  self._on_heading)
-        self._relay(BatteryState,  f"/{ns}/battery",                      "/bluerov/battery",  self._on_battery)
-        self._relay(NavSatFix,     f"/{ns}/global_position/global",       "/bluerov/gps")
-        self._relay(RCIn,          f"/{ns}/rc/in",                        "/bluerov/rc_in")
-        self._relay(RCOut,         f"/{ns}/rc/out",                       "/bluerov/rc_out")
-        self._relay(State,         f"/{ns}/state",                        "/bluerov/state",    self._on_state)
-        self._relay(Altitude,      f"/{ns}/altitude",                     "/bluerov/altitude")
-        self._relay(TwistStamped,  f"/{ns}/local_position/velocity_body", "/bluerov/velocity")
-
-        self._pub_attitude = self.create_publisher(Vector3Stamped, "/bluerov/attitude", PUB_QOS)
-        self._pub_depth = self.create_publisher(Float64, "/bluerov/depth", PUB_QOS)
-        self._pub_depth_stamped = self.create_publisher(PointStamped, "/bluerov/depth_stamped", PUB_QOS)
-        self._pub_heading_stamped = self.create_publisher(
-            Vector3Stamped, "/bluerov/heading_stamped", PUB_QOS)
-        self._pub_latency = self.create_publisher(Float64, "/MAVROS_latency", PUB_QOS)
+        self._watch(Imu,           f"/{ns}/imu/data",                     self._on_imu)
+        self._watch(FluidPressure, f"/{ns}/imu/static_pressure",          self._on_pressure)
+        self._watch(Float64,       f"/{ns}/global_position/rel_alt",      self._on_rel_alt)
+        # Depth = -pose.pose.position.z of global_position/local (ENU, z up).
+        self._watch(Odometry,      f"/{ns}/global_position/local")
+        self._watch(Float64,       f"/{ns}/global_position/compass_hdg",  self._on_heading)
+        self._watch(BatteryState,  f"/{ns}/battery",                      self._on_battery)
+        self._watch(NavSatFix,     f"/{ns}/global_position/global")
+        self._watch(RCIn,          f"/{ns}/rc/in")
+        self._watch(RCOut,         f"/{ns}/rc/out")
+        self._watch(State,         f"/{ns}/state",                        self._on_state)
+        self._watch(Altitude,      f"/{ns}/altitude")
+        self._watch(TwistStamped,  f"/{ns}/local_position/velocity_body")
 
         self._stream_cli = self.create_client(StreamRate, f"/{ns}/set_stream_rate")
         self._cmd_cli = self.create_client(CommandLong, f"/{ns}/cmd/command")
@@ -215,15 +173,12 @@ class BlueROVSensorNode(Node):
                                f"Waiting for FCU connection...")
 
     # ------------------------------------------------------------------
-    def _relay(self, msg_type, src, dst, extra=None):
-        """Subscribe to src, optionally republish on dst, count messages, run extra(msg)."""
-        pub = self.create_publisher(msg_type, dst, PUB_QOS) if dst else None
+    def _watch(self, msg_type, src, extra=None):
+        """Subscribe to src, count messages, run extra(msg)."""
         self._counts[src] = 0
 
         def cb(msg):
             self._counts[src] += 1
-            if pub is not None:
-                pub.publish(msg)
             if extra is not None:
                 extra(msg)
 
@@ -245,20 +200,6 @@ class BlueROVSensorNode(Node):
 
     def _on_imu(self, msg: Imu):
         self._rpy = quat_to_rpy_deg(msg.orientation)
-        att = Vector3Stamped()
-        att.header = msg.header
-        att.vector.x, att.vector.y, att.vector.z = self._rpy
-        self._pub_attitude.publish(att)
-
-        stamp_ns = msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
-        self._imu_delays.append((self.get_clock().now().nanoseconds - stamp_ns) / 1e9)
-        self._imu_frame = msg.header.frame_id
-
-        # ENU yaw (0 = east, counter-clockwise) -> compass heading (0 = north, clockwise).
-        hdg = Vector3Stamped()
-        hdg.header = msg.header
-        hdg.vector.z = (90.0 - self._rpy[2]) % 360.0
-        self._pub_heading_stamped.publish(hdg)
 
     def _on_heading(self, msg: Float64):
         self._heading = msg.data
@@ -278,30 +219,6 @@ class BlueROVSensorNode(Node):
     def _on_rel_alt(self, msg: Float64):
         # ArduSub reports altitude relative to the surface (negative underwater).
         self._depth = -msg.data
-        self._pub_depth.publish(Float64(data=self._depth))
-
-        if self._local_fresh():
-            return  # _on_local publishes depth_stamped with the exact stamp
-        # Arrival time minus link delay. The minimum filters out queuing jitter.
-        delay = min(self._imu_delays) if self._imu_delays else 0.0
-        out = PointStamped()
-        out.header.stamp = (self.get_clock().now() - Duration(seconds=max(delay, 0.0))).to_msg()
-        out.header.frame_id = self._imu_frame
-        out.point.z = self._depth
-        self._pub_depth_stamped.publish(out)
-
-    def _local_fresh(self):
-        return (self._local_last is not None
-                and time.monotonic() - self._local_last < LOCAL_STALE_SEC)
-
-    def _on_local(self, msg: Odometry):
-        self._local_last = time.monotonic()
-        # With use_relative_alt (MAVROS default for ArduPilot), z is rel_alt from the
-        # same GLOBAL_POSITION_INT, but this message keeps its measurement stamp.
-        out = PointStamped()
-        out.header = msg.header
-        out.point.z = -msg.pose.pose.position.z
-        self._pub_depth_stamped.publish(out)
 
     def _on_battery(self, msg: BatteryState):
         self._batt_v = msg.voltage
@@ -462,7 +379,6 @@ class BlueROVSensorNode(Node):
         one_way = rtt_ms / 2.0
         self._lat_last_ms = one_way
         self._lat_window.append(one_way)
-        self._pub_latency.publish(Float64(data=one_way))
 
     # ---------------- Status report ----------------
     def _report_status(self):
@@ -486,7 +402,6 @@ class BlueROVSensorNode(Node):
             f"[STATUS] connected={self._connected} armed={self._armed} mode={self._mode} | "
             f"heading={fmt(self._heading, '.1f')} deg | roll/pitch/yaw={rpy} deg | "
             f"depth(rel_alt)={fmt(self._depth, '.2f')} m depth(pressure)={fmt(self._press_depth, '.2f')} m | "
-            f"depth_stamp={'measured' if self._local_fresh() else 'estimated'} | "
             f"battery={fmt(self._batt_v, '.2f')} V | latency={lat}"
         )
 
