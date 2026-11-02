@@ -1046,6 +1046,9 @@ AUTOPILOT_ESTIMATES = [
     (r"local_position/", r".", "autopilot local position estimate (EKF)"),
     (r"vfr_hud$", r".", "autopilot summary values"),
     (r"^derived/heading$", r".", "calculated from the autopilot's attitude estimate"),
+    (r"^derived/imu/data/gravity_removed$", r"^linear_acceleration",
+     "gravity removed using the autopilot's attitude estimate"),
+    (r"^derived/turn$", r".", "uses the autopilot's attitude estimate (heading axis, gravity removal)"),
 ]
 
 

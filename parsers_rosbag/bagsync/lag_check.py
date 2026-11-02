@@ -52,9 +52,20 @@ def read_csv(path):
     with open(path, newline="") as f:
         r = csv.reader(f)
         head = next(r)
-        rows = [[float(v) if v != "" else np.nan for v in row] for row in r]
-    arr = np.array(rows, float)
-    return {h: arr[:, j] for j, h in enumerate(head)}
+        rows = list(r)
+
+    def num(v):
+        try:
+            return float(v) if v != "" else np.nan
+        except ValueError:
+            return None                                   # text, e.g. the action label
+
+    out = {}
+    for j, h in enumerate(head):
+        col = [num(row[j]) for row in rows]
+        if all(v is not None for v in col):                # numeric columns only
+            out[h] = np.array(col, float)
+    return out
 
 
 def fill(x):
@@ -76,7 +87,7 @@ def find_columns(d, skip):
             tags.setdefault(int(m.group(1)), {})[m.group(2)] = c
     imu = {}
     for c in d:
-        m = re.search(r"imu(?:/data)?\.linear_acceleration\.([xyz])$", c)
+        m = re.search(r"imu(?:/data)?(?:/gravity_removed)?\.linear_acceleration\.([xyz])$", c)
         if m:
             imu[m.group(1)] = c
     return tags, imu

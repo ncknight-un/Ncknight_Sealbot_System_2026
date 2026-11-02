@@ -319,7 +319,9 @@ DERIVED_IMU = "/derived/imu_velocity"
 
 
 def _find_series(data: BagData, want_cols, prefer=()):
-    cands = [s for s in data.series.values() if all(c in s.cols for c in want_cols)]
+    """A recorded series holding all of want_cols (calculated 'derived' series are never picked, so
+    e.g. the gravity-removed IMU can't stand in for the recorded one)."""
+    cands = [s for s in data.series.values() if s.msgtype != "derived" and all(c in s.cols for c in want_cols)]
     for p in prefer:
         for s in cands:
             if s.name.endswith(p):
@@ -390,6 +392,135 @@ def heading_series(data: BagData) -> Series | None:
                   {"heading_deg": hdg % 360.0, "heading_unwrapped_deg": unwrapped},
                   {"heading_deg": "float", "heading_unwrapped_deg": "float"}, s_imu.time_source, {},
                   {"kind": "derived", "source": s_imu.name})
+
+
+DERIVED_GRAV = "/derived/imu/data/gravity_removed"
+# g used for gravity removal, m/s². None = measured from the recording: the median magnitude of the
+# accelerometer over the whole bag (the ROV is mostly not accelerating, so this is g as THIS sensor
+# reads it, scale error included). Set a number (e.g. 9.80665) to use a fixed value instead.
+GRAVITY_MS2: float | None = None
+
+
+def gravity_removed_series(data: BagData, g: float | None = GRAVITY_MS2) -> Series | None:
+    """
+    The IMU with gravity removed, on the IMU's own times (orientation and acceleration come from the
+    same imu/data message, so no interpolation is involved):
+      linear_acceleration.x/y/z        a = f - g * R^T [0, 0, 1]: the accelerometer f minus gravity
+                                       as seen in the body frame, m/s². Body (IMU) axes, like the
+                                       recorded topic: x forward, y left, z up. ≈ 0 at rest.
+      linear_acceleration_world.x/y/z  the same in the world frame (ENU: x east, y north, z up)
+      angular_velocity.x/y/z           the gyro, copied unchanged (rad/s), so this one topic holds
+                                       everything the tag_to_imu_format IMU columns need
+    R is the autopilot's attitude estimate (imu/data orientation, ENU world <- FLU body, as MAVROS
+    publishes it). Rows without a usable orientation get blank accelerations.
+    """
+    q_cols = [f"orientation.{a}" for a in "xyzw"]
+    f_cols = [f"linear_acceleration.{a}" for a in "xyz"]
+    w_cols = [f"angular_velocity.{a}" for a in "xyz"]
+    s_imu = _find_series(data, q_cols + f_cols + w_cols, prefer=("/imu/data",))
+    if s_imu is None:
+        return None
+    q = np.stack([s_imu.cols[c] for c in q_cols], 1).astype(float)
+    f = np.stack([s_imu.cols[c] for c in f_cols], 1).astype(float)
+    qn = np.linalg.norm(np.nan_to_num(q), axis=1)
+    good_q = np.isfinite(q).all(1) & (qn > 0.5)
+    # mavros fills (0, 0, 0, 1) when the message carries no orientation (e.g. imu/data_raw)
+    if not good_q.any() or np.all(q[good_q, :3] == 0):
+        return None
+    good_f = np.isfinite(f).all(1)
+    if g is None:
+        mag = np.linalg.norm(f[good_f], axis=1)
+        if len(mag) == 0:
+            return None
+        g_val, g_from = float(np.median(mag)), "median |accelerometer| over the recording"
+    else:
+        g_val, g_from = float(g), "fixed (GRAVITY_MS2)"
+    ok = good_q & good_f
+    R = quat_to_mat(q[ok] / qn[ok, None])                      # body -> world
+    a_body = np.full_like(f, np.nan)
+    a_world = np.full_like(f, np.nan)
+    a_body[ok] = f[ok] - g_val * R[:, 2, :]                    # R^T e_z = third row of R
+    a_world[ok] = np.einsum("nij,nj->ni", R, f[ok]) - np.array([0.0, 0.0, g_val])
+    cols = {}
+    for j, a in enumerate("xyz"):
+        cols[f"linear_acceleration.{a}"] = a_body[:, j]
+    for j, a in enumerate("xyz"):
+        cols[f"linear_acceleration_world.{a}"] = a_world[:, j]
+    for c in w_cols:
+        cols[c] = np.asarray(s_imu.cols[c], float)
+    return Series(DERIVED_GRAV, "derived/imu/data/gravity_removed", "derived", s_imu.t, cols,
+                  {k: "float" for k in cols}, s_imu.time_source, {},
+                  {"kind": "derived", "source": s_imu.name, "gravity_ms2": round(g_val, 4),
+                   "gravity_from": g_from, "rows_without_orientation": int((~good_q).sum()),
+                   "label": "IMU with gravity removed using the autopilot's attitude"})
+
+
+DERIVED_TURN = "/derived/turn"
+TURN_RATE_AVG_S = 5.0    # trailing (past-only, so usable live) average of the turn rate, s
+
+
+def _time_mean(t_ns, x, win_s, trailing=False):
+    """Moving average over a time window (not a sample count, so uneven stamps are fine): centred, or
+    trailing = only the last win_s seconds up to each sample (uses no future data, so it can be computed
+    live). NaNs are skipped; NaN where the window holds no values."""
+    t = (np.asarray(t_ns, np.int64) - int(t_ns[0])) / 1e9
+    ok = np.isfinite(x)
+    c = np.r_[0.0, np.cumsum(np.where(ok, x, 0.0))]
+    n = np.r_[0, np.cumsum(ok)]
+    back, ahead = (win_s, 0.0) if trailing else (win_s / 2, win_s / 2)
+    lo = np.searchsorted(t, t - back, side="left")
+    hi = np.searchsorted(t, t + ahead, side="right")
+    cnt = n[hi] - n[lo]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(cnt > 0, (c[hi] - c[lo]) / np.maximum(cnt, 1), np.nan)
+
+
+def turn_series(data: BagData, grav: Series | None = None) -> Series | None:
+    """
+    How the ROV is turning, on the IMU's own times:
+      turn_rate, turn_rate_deg_s   rate the HEADING changes (rad/s, deg/s), + = turning left: the rate of the
+                                   nose's horizontal direction, (w_y sin roll + w_z cos roll) / cos pitch, so
+                                   pitching and rolling don't count as turning (the gyro's own z only equals
+                                   it when level). Gyro-based; the attitude only supplies roll and pitch.
+      turn_rate_avg                turn_rate averaged over the last TURN_RATE_AVG_S seconds (rad/s). Past
+                                   samples only, so it can be computed the same way live. ≈ 0 going straight.
+      acc_lateral                  horizontal acceleration across the heading (m/s², + = toward the left),
+                                   gravity removed. ≈ 0 at rest and on average going straight: a quick check of
+                                   the gravity removal.
+    """
+    q_cols = [f"orientation.{a}" for a in "xyzw"]
+    f_cols = [f"linear_acceleration.{a}" for a in "xyz"]
+    w_cols = [f"angular_velocity.{a}" for a in "xyz"]
+    s_imu = _find_series(data, q_cols + f_cols + w_cols, prefer=("/imu/data",))
+    grav = grav if grav is not None else data.series.get(DERIVED_GRAV) or gravity_removed_series(data)
+    if s_imu is None or grav is None or len(grav.t) != len(s_imu.t):
+        return None
+    q = np.stack([s_imu.cols[c] for c in q_cols], 1).astype(float)
+    w = np.stack([s_imu.cols[c] for c in w_cols], 1).astype(float)
+    a_w = np.stack([grav.cols[f"linear_acceleration_world.{a}"] for a in "xyz"], 1)
+    qn = np.linalg.norm(np.nan_to_num(q), axis=1)
+    ok = np.isfinite(q).all(1) & (qn > 0.5) & np.isfinite(w).all(1)
+    n = len(s_imu.t)
+    rate = np.full(n, np.nan)
+    acc_lat = np.full(n, np.nan)
+    R = quat_to_mat(q[ok] / qn[ok, None])                          # body -> world (ENU)
+    fwd = R[:, :2, 0]                                              # body x (nose) projected on the horizontal
+    fn = np.linalg.norm(fwd, axis=1)                               # = cos(pitch)
+    good = fn > 0.2                                                # nose not pointing straight up/down
+    # rate of the nose's horizontal direction (the yaw / heading rate):
+    #   (w_y sin(roll) + w_z cos(roll)) / cos(pitch), with sin/cos(roll)·cos(pitch) = R[2,1], R[2,2]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        hr = (w[ok, 1] * R[:, 2, 1] + w[ok, 2] * R[:, 2, 2]) / fn ** 2
+    rate[ok] = np.where(good, hr, np.nan)
+    left = np.full((len(fwd), 2), np.nan)
+    left[good] = np.stack([-fwd[good, 1], fwd[good, 0]], 1) / fn[good, None]
+    acc_lat[ok] = np.einsum("nj,nj->n", left, a_w[ok, :2])
+    cols = {"turn_rate": rate, "turn_rate_deg_s": np.degrees(rate),
+            "turn_rate_avg": _time_mean(s_imu.t, rate, TURN_RATE_AVG_S, trailing=True), "acc_lateral": acc_lat}
+    return Series(DERIVED_TURN, "derived/turn", "derived", s_imu.t, cols, {k: "float" for k in cols},
+                  s_imu.time_source, {},
+                  {"kind": "derived", "source": s_imu.name, "turn_rate_avg_s": TURN_RATE_AVG_S,
+                   "label": "heading rate (+ = left), its trailing average, and lateral acceleration"})
 
 
 IMU_MODES = ("rest", "odom")
@@ -1144,9 +1275,12 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
          tag number: translation_mm.x/y/z (mm, along the zero frame's axes) and rotation.x/y/z/w
          (quaternion; identity = on the zero pose). Tags without a zero frame are left out.
          Each tag is followed by <tag>.seen: 1 if detected in that frame, else 0.
-      2. the IMU (imu/data), as recorded: linear_acceleration.x/y/z (m/s², gravity included, so it
-         needs no attitude estimate) and angular_velocity.x/y/z (rad/s). No orientation.
+      2. the IMU with gravity removed (derived/imu/data/gravity_removed, see gravity_removed_series):
+         linear_acceleration.x/y/z (m/s², body axes, ≈ 0 at rest) and angular_velocity.x/y/z (rad/s).
+         The export fails if it can't be made (no IMU orientation).
       3. depth: global_position/local pose.pose.position.z (metres, negative underwater)
+      4. derived/turn.turn_rate_avg: heading rate (rad/s, + = left) averaged over the last 5 s (past only)
+    (write_tag_to_imu_csv then adds the two label columns, action and approx_diam.)
     Returns ([(series_name, column)], notes).
     """
     notes: list[str] = []
@@ -1174,12 +1308,16 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
     for child in sorted(devs, key=_tag_sort_key):
         cols += [(devs[child].name, c) for c in TAG_IMU_TF_FIELDS]
 
-    imu = _find_series(data, TAG_IMU_IMU_FIELDS, prefer=("/imu/data",))
-    if imu is None:
-        notes.append("no IMU topic with linear_acceleration and angular_velocity found")
-    else:
-        cols += [(imu.name, c) for c in TAG_IMU_IMU_FIELDS]
-        notes.append(f"IMU: {imu.short} (acceleration with gravity, gyro)")
+    grav = data.series.get(DERIVED_GRAV)
+    if grav is None:
+        grav = gravity_removed_series(data)
+        if grav is None:
+            raise RuntimeError("can't export tag_to_imu_format: derived/imu/data/gravity_removed couldn't be made "
+                               "(no imu/data topic with orientation, linear_acceleration and angular_velocity)")
+        data.series[grav.name] = grav
+    cols += [(grav.name, c) for c in TAG_IMU_IMU_FIELDS]
+    notes.append(f"IMU: {grav.short} (gravity removed with the autopilot attitude, "
+                 f"g = {grav.info['gravity_ms2']:.4f} m/s², {grav.info['gravity_from']}; gyro unchanged)")
 
     recorded = [s for s in data.series.values() if s.msgtype != "derived" and s.info.get("kind") == "topic"]
     depth = next((s for s in recorded if s.name.rstrip("/").endswith(DEPTH_TOPIC) and DEPTH_COL in s.cols), None)
@@ -1188,6 +1326,16 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
     else:
         cols.append((depth.name, DEPTH_COL))
         notes.append(f"depth: {depth.short}.{DEPTH_COL} (negative underwater)")
+
+    turn = data.series.get(DERIVED_TURN)
+    if turn is None:
+        turn = turn_series(data, grav)
+        if turn is None:
+            raise RuntimeError("can't export tag_to_imu_format: derived/turn couldn't be made")
+        data.series[turn.name] = turn
+    cols.append((turn.name, "turn_rate_avg"))
+    notes.append(f"turn rate: {turn.short}.turn_rate_avg (rad/s, + = left, average of the last "
+                 f"{TURN_RATE_AVG_S:g} s)")
     return cols, notes
 
 
@@ -1235,9 +1383,39 @@ def frame_dt(data: BagData, res: SyncResult, rate: float | None = None) -> np.nd
     return dt
 
 
+ACTIONS = ("straight", "right", "left")     # allowed values of the action label column
+
+
+STRAIGHT_DIAM = -1.0                        # approx_diam written for straight runs (no circle)
+
+
+def check_labels(action: str | None, approx_diam) -> tuple[str, float | None]:
+    """Validate the user's labels for a tag_to_imu_format export. Returns (action or "", diameter or None).
+    A straight run always gets approx_diam = -1 (STRAIGHT_DIAM); a turn needs a positive diameter or blank."""
+    action = (action or "").strip().lower()
+    if action and action not in ACTIONS:
+        raise ValueError(f"action must be one of {', '.join(ACTIONS)} (or empty), not {action!r}")
+    blank = approx_diam is None or (isinstance(approx_diam, str) and not approx_diam.strip())
+    if action == "straight":
+        if not blank and float(approx_diam) != STRAIGHT_DIAM:
+            raise ValueError(f"straight runs get approx_diam = {STRAIGHT_DIAM:g} automatically; leave it blank")
+        return action, STRAIGHT_DIAM
+    if blank:
+        return action, None
+    r = float(approx_diam)
+    if not np.isfinite(r) or r <= 0:
+        raise ValueError(f"approx_diam must be a positive number of metres, not {approx_diam!r}")
+    return action, r
+
+
 def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
-                         meta: dict | None = None, sidecar: bool = False) -> Path:
-    """tag_to_imu_format CSV: t_s, dt_s, then the tag tf columns, the IMU columns, the depth column."""
+                         meta: dict | None = None, sidecar: bool = False,
+                         action: str | None = None, approx_diam: float | None = None) -> Path:
+    """tag_to_imu_format CSV: t_s, dt_s, then the tag tf columns, the IMU columns, the depth column,
+    then the two label columns the user typed in for this export: action (straight / right / left)
+    and approx_diam (approximate circle diameter, m; -1 for straight). Both are the same on every row;
+    blank if not given."""
+    action, approx_diam = check_labels(action, approx_diam)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     dt = frame_dt(data, res, rate)
@@ -1245,9 +1423,10 @@ def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate:
     cols = [[f"{x:.6f}" for x in t_rel],
             ["" if x != x else f"{x:.9f}" for x in dt.tolist()]]
     cols += [_fmt_col(v, k) for v, k in zip(res.values, res.kinds)]
+    cols += [[action] * res.n_rows, ["" if approx_diam is None else f"{approx_diam:g}"] * res.n_rows]
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["t_s", "dt_s"] + res.names)
+        w.writerow(["t_s", "dt_s"] + res.names + ["action", "approx_diam"])
         w.writerows(zip(*cols))
     if sidecar:
         side = {"csv": path.name, "format": TAG_IMU_FORMAT, "rows": res.n_rows,
@@ -1259,7 +1438,8 @@ def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate:
                 "t_s": "seconds since the export's first row (Start = 0)",
                 "t_s_zero_in_bag_s": float((res.t[0] - res.t0) / 1e9) if res.n_rows else None,
                 "dt_s": "seconds since the previous camera frame in the bag (blank for the bag's first frame)",
-                "columns": {n: m for n, m in zip(res.names, res.modes)}, "series": res.notes}
+                "columns": {n: m for n, m in zip(res.names, res.modes)}, "series": res.notes,
+                "labels": {"action": action or None, "approx_diam_m": approx_diam}}
         if meta:
             side.update(meta)
         path.with_suffix(".sync.json").write_text(json.dumps(side, indent=1))
@@ -1474,8 +1654,16 @@ def main(argv=None):
     ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT), default="standard",
                     help=f"'{TAG_IMU_FORMAT}': time since the export's start (0 = --start), dt between camera "
                          "frames, then each tag's deviation from its zero frame (translation + quaternion) and a "
-                         "seen flag, the IMU (linear_acceleration with gravity, angular_velocity), and the "
+                         "seen flag, the IMU with gravity removed (derived/imu/data/gravity_removed: "
+                         "linear_acceleration, angular_velocity), and the "
                          "depth topic last. No orientation. Ignores --topics and --integrate-imu.")
+    ap.add_argument("--action", choices=ACTIONS,
+                    help=f"{TAG_IMU_FORMAT} only: label written to every row's 'action' column "
+                         "(what the ROV is doing in this window). Blank if not given.")
+    ap.add_argument("--approx-diam", type=float, metavar="M",
+                    help=f"{TAG_IMU_FORMAT} only: approximate circle diameter in metres (e.g. 2.5, 5, 7.5), "
+                         "written to every row's 'approx_diam' column. --action straight writes -1 automatically. "
+                         "Blank if not given.")
     ap.add_argument("--fcu-time", action="store_true",
                     help="give MAVROS topics the autopilot's own sample times, decoded from the recorded raw "
                          "MAVLink stream (.../mavlink_source). Topics it can't do are left as recorded.")
@@ -1531,6 +1719,12 @@ def main(argv=None):
     hdg = heading_series(data)
     if hdg is not None:
         data.series[hdg.name] = hdg
+    grav = gravity_removed_series(data)
+    if grav is not None:
+        data.series[grav.name] = grav
+        turn = turn_series(data, grav)
+        if turn is not None:
+            data.series[turn.name] = turn
     thr = thruster_series(data, [int(x) for x in a.thrusters.split(",") if x.strip()])
     if thr is not None:
         data.series[thr.name] = thr
@@ -1546,6 +1740,10 @@ def main(argv=None):
             print(imu_summary(s_int.info))
 
     if a.format == TAG_IMU_FORMAT:
+        try:
+            a.action, a.approx_diam = check_labels(a.action, a.approx_diam)
+        except ValueError as e:
+            ap.error(str(e))
         res, notes = tag_to_imu_sync(data, a.start, a.stop, a.gap_factor, a.rate)
         if res.n_rows == 0:
             print("No camera frames inside that window.")
@@ -1554,8 +1752,9 @@ def main(argv=None):
         write_tag_to_imu_csv(data, res, out, a.rate, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
                                                       "gap_factor": a.gap_factor, "notes": notes,
                                                       "autopilot_timed": fcu_reports},
-                             sidecar=a.sidecar)
-        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 2} columns, {TAG_IMU_FORMAT})")
+                             sidecar=a.sidecar, action=a.action, approx_diam=a.approx_diam)
+        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 4} columns, {TAG_IMU_FORMAT}, "
+              f"action={a.action or '(blank)'}, approx_diam={a.approx_diam if a.approx_diam else '(blank)'})")
         for n in notes:
             print("  " + n)
         if a.export_images:
@@ -1566,7 +1765,7 @@ def main(argv=None):
     columns = None
     if a.topics:
         a.topics = list(a.topics) + (["derived/imu_vel"] if a.integrate_imu else []) + \
-            ["derived/forward_motion_diag", "derived/heading"]
+            ["derived/forward_motion_diag", "derived/heading", "derived/imu/data/gravity_removed", "derived/turn"]
         columns = [(n, c) for n, s in data.series.items()
                    if any(sub in n or sub in s.short for sub in a.topics) for c in s.cols]
         if not columns:

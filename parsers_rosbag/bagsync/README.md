@@ -64,6 +64,12 @@ If a calculated entry is missing, **Bag info** and the terminal say why.
 - `derived/forward_motion_diag`: a forward-motion diagnostic. `ch0_us` … `ch3_us` are the four horizontal thrusters (`rc/out` channels 0–3), PWM − 1500 µs. 0 = idle; the sign gives the direction. Set other channels with `--thrusters`.
 - **RC channel actions.** Every RC channel shows what it does in brackets, in the field list, plot legends and titles, e.g. `channels[0] (horizontal thruster 1, forward)` on `rc/out` and `channels[4] (forward)` on `rc/in`. The defaults are ArduSub's BlueROV2 vectored frame; edit `RC_OUT_ACTIONS` / `RC_IN_ACTIONS` at the top of `bag_viewer.py` for another vehicle.
 - `derived/tf[A->B]`: the measured pose of frame B seen from frame A (see **TF tree** below).
+- `derived/imu/data/gravity_removed`: the IMU with gravity taken out using the autopilot's orientation (`imu/data` quaternion). `linear_acceleration.x/y/z` is `f − g·Rᵀ[0,0,1]` in the IMU's own axes (≈ 0 at rest); `linear_acceleration_world.x/y/z` is the same in ENU; `angular_velocity.x/y/z` is the gyro unchanged. g is the median accelerometer magnitude over the bag (set `GRAVITY_MS2` in `sync_export.py` for a fixed value). Because it relies on the attitude estimate, a 1° tilt error leaks about 0.17 m/s² of gravity into the horizontal axes; its acceleration fields are shown orange.
+- `derived/turn`: how the ROV is turning, on the IMU's times (shown orange: it uses the autopilot attitude for roll and pitch).
+  - `turn_rate` / `turn_rate_deg_s`: rate the heading changes, + = left. Computed as (ω_y·sin roll + ω_z·cos roll) / cos pitch, so pitching and rolling don't count as turning (the gyro's own z only equals it when level).
+  - `turn_rate_avg`: turn_rate averaged over the last 5 s (`TURN_RATE_AVG_S`). It uses past samples only, so the same number can be computed live. About 0 going straight.
+  - `acc_lateral`: horizontal acceleration across the heading, gravity removed, + = left. About 0 at rest and on average going straight, so it's a quick check of the gravity removal.
+  - Circle size isn't calculated here: estimates from the accelerometer (sideways acceleration ÷ turn rate²) blew up on slow turns and didn't match the 2.5 / 5 / 7.5 m test circles. Size comes from the `approx_diam` label instead.
 - `derived/heading`: one standard heading from the IMU. `heading_deg` uses the compass convention (0 = north, clockwise, 0–360). `heading_unwrapped_deg` is the same but continuous across north (359 → 361), so it's safe to difference, average or filter.
 
 **More viewer controls:**
@@ -249,14 +255,20 @@ The third choice in the export dropdown (or `--format tag_to_imu_format` on the 
 | `dt_s` | Seconds since the previous camera frame in the bag (a dropped frame shows as about 2× the usual value; blank only for the bag's very first frame) |
 | `derived/tf[tag_N_zero->tag_N].translation_mm.x/y/z`, `.rotation.x/y/z/w` | Each live tag's deviation from its zero frame (see **TF tree**): mm along the zero frame's axes, and a quaternion that is (0, 0, 0, 1) on the zero pose. Sorted by tag number. Tags without a zero frame are left out and listed in the status bar. Blank when the tag wasn't detected in that frame |
 | `derived/tf[tag_N_zero->tag_N].seen` | After each tag's rotation columns: 1 when the tag was detected in that frame, 0 when it wasn't |
-| `…imu/data.linear_acceleration.x/y/z` | The accelerometer as recorded, m/s², **gravity included** (≈ +9.8 on z when level and still). No attitude estimate is involved, so nothing can shift it between test days |
-| `…imu/data.angular_velocity.x/y/z` | The gyro, rad/s |
-| `…global_position/local.pose.pose.position.z` | Depth, last, metres, **negative underwater** (MAVROS's up-positive axis). Published by MAVROS with a header (its stamp of the `GLOBAL_POSITION_INT` it came from), so **Autopilot timing** pairs it exactly |
+| `derived/imu/data/gravity_removed.linear_acceleration.x/y/z` | The accelerometer with **gravity removed** using the autopilot's attitude, m/s², IMU axes (≈ 0 at rest). The export fails if the bag has no IMU orientation |
+| `derived/imu/data/gravity_removed.angular_velocity.x/y/z` | The gyro, rad/s (unchanged) |
+| `…global_position/local.pose.pose.position.z` | Depth, metres, **negative underwater** (MAVROS's up-positive axis). Published by MAVROS with a header (its stamp of the `GLOBAL_POSITION_INT` it came from), so **Autopilot timing** pairs it exactly |
+| `action` | Label you give when exporting: `straight`, `right` or `left` (same on every row; blank if not given) |
+| `derived/turn.turn_rate_avg` | Heading rate averaged over the last 5 s, rad/s, + = left (gyro). About 0 going straight |
+| `approx_diam` | Label you give when exporting: approximate circle **diameter**, metres (e.g. 2.5, 5, 7.5). **Straight runs are written as -1 automatically**; blank if not given for a turn |
+
+In the viewer a small dialog asks for the two labels when you export this format (it remembers the last answers). The labels apply to every row, so set Start/Stop around the manoeuvre itself: rest before or after it would be labelled as the manoeuvre. On the command line: `--action left --approx-diam 2.5`.
 
 The IMU columns are interpolated to each frame's time. There are no orientation columns and no `timestamp`/`frame_idx` columns. Tick **Save .json notes** to record the first absolute timestamp and frame range in a sidecar. The **Include IMU velocity** box doesn't apply to this format.
 
 ```bash
 python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format -o run1_tag_imu.csv
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format --action right --approx-diam 5 -o run1_right.csv
 ```
 
 ### Autopilot timing (exact sample times from the MAVLink stream)

@@ -40,9 +40,9 @@ from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 from bagcache import VERSION, BagData, autopilot_note, bag_summary, field_status, load_bag
 from sync_export import (REFERENCE_TAGS, DERIVED_IMU, DERIVED_THR, GAP_FACTOR, HORIZONTAL_CHANNELS, export_images,
-                         heading_series, tag_pixel_position, tf_frames, tf_pair_series, tf_tree_series,
+                         heading_series, gravity_removed_series, turn_series, tag_pixel_position, tf_frames, tf_pair_series, tf_tree_series,
                          tf_tree_text, imu_summary, integrate_imu, sync, thruster_series, write_csv,
-                         TAG_IMU_FORMAT, tag_to_imu_sync, write_tag_to_imu_csv,
+                         TAG_IMU_FORMAT, tag_to_imu_sync, write_tag_to_imu_csv, ACTIONS, check_labels,
                          clock_report)
 from fcutime import fcu_text, fcu_time_series
 
@@ -57,6 +57,8 @@ LINE_COLORS = ["#4e9cf5", "#f5a14e", "#5fd38d", "#e5625c", "#b58cf2", "#e8d25a",
                "#4ed0d6", "#f27fb7", "#a3d65c", "#ff8a65", "#9fa8da", "#ffffff"]
 # Units shown in plot titles (regex on '<topic>.<field group>').
 UNITS = [
+    (r"_deg_s$", "deg/s"),
+    (r"turn_rate(_avg)?$", "rad/s"),
     (r"translation_mm|_mm$", "mm"),
     (r"_deg$|roll/pitch/yaw|compass_hdg", "deg"),
     (r"angular_velocity|twist\.angular", "rad/s"),
@@ -566,9 +568,11 @@ class Viewer(QtWidgets.QMainWindow):
         self.cols_mode.setItemData(2, (
             "t_s (seconds since Start; the first row is 0), dt_s (seconds since the previous camera\n"
             "frame), then every tag's deviation from its zero frame (translation x/y/z mm +\n"
-            "quaternion x/y/z/w and a seen flag, sorted by tag number), then the IMU\n"
-            "(linear_acceleration with gravity, angular_velocity), and depth from\n"
-            "global_position/local (pose z, negative underwater) as the last column.\n"
+            "quaternion x/y/z/w and a seen flag, sorted by tag number), then the IMU with gravity\n"
+            "removed (derived/imu/data/gravity_removed: linear_acceleration, angular_velocity), depth\n"
+            "from global_position/local (pose z, negative underwater), the turn rate averaged over the\n"
+            "last 5 s (derived/turn.turn_rate_avg), and the two labels you type\n"
+            "in when exporting: action (straight/right/left) and approx_diam (circle diameter, m).\n"
             "'Include IMU velocity' is ignored."),
             QtCore.Qt.ItemDataRole.ToolTipRole)
         self.gap_spin = QtWidgets.QDoubleSpinBox(decimals=1, value=GAP_FACTOR, prefix="gap × ")
@@ -775,6 +779,22 @@ class Viewer(QtWidgets.QMainWindow):
             self._derived_note("derived/heading", "ok" if hdg is not None else "not created - no IMU orientation")
         except Exception as e:  # noqa: BLE001
             self._derived_note("derived/heading", f"failed: {type(e).__name__}: {e}")
+        try:
+            grav = gravity_removed_series(data)
+            if grav is not None:
+                data.series[grav.name] = grav
+            self._derived_note("derived/imu/data/gravity_removed",
+                               f"ok (g = {grav.info['gravity_ms2']:.4f} m/s², {grav.info['gravity_from']})"
+                               if grav is not None else "not created - no IMU orientation")
+        except Exception as e:  # noqa: BLE001
+            self._derived_note("derived/imu/data/gravity_removed", f"failed: {type(e).__name__}: {e}")
+        try:
+            turn = turn_series(data)
+            if turn is not None:
+                data.series[turn.name] = turn
+            self._derived_note("derived/turn", "ok" if turn is not None else "not created - no IMU orientation")
+        except Exception as e:  # noqa: BLE001
+            self._derived_note("derived/turn", f"failed: {type(e).__name__}: {e}")
         self._compute_tf_tree()
         self._populate_tree()
         self.slider.blockSignals(True)
@@ -1837,8 +1857,47 @@ class Viewer(QtWidgets.QMainWindow):
         self.statusBar().showMessage(msg, 12000)
         self._maybe_export_pngs(res, path, msg)
 
+    def _ask_labels(self):
+        """Ask for the action / approx_diam labels of a tag_to_imu_format export. None = cancelled.
+        The previous answers are offered again, so a batch of similar runs is quick to label."""
+        last = getattr(self, "_last_labels", ("", ""))
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Labels for this export")
+        form = QtWidgets.QFormLayout(dlg)
+        act = QtWidgets.QComboBox()
+        act.addItems(["(blank)"] + list(ACTIONS))
+        act.setCurrentIndex(act.findText(last[0]) if last[0] in ACTIONS else 0)
+        rad = QtWidgets.QLineEdit(last[1])
+        rad.setPlaceholderText("diameter, metres: e.g. 2.5, 5, 7.5 (straight: -1, set automatically)")
+        form.addRow("action", act)
+        form.addRow("approx_diam (m)", rad)
+        form.addRow(QtWidgets.QLabel("Written to every row of the CSV, as its last two columns.\n"
+                                     "No labels: both columns left blank (the trainer then uses this\n"
+                                     "recording for the measured targets only)."))
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok
+                                        | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        nolab = bb.addButton("No labels", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole)
+        nolab.clicked.connect(lambda: (act.setCurrentIndex(0), rad.clear(), dlg.accept()))
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        while True:
+            if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return None
+            a = "" if act.currentIndex() == 0 else act.currentText()
+            try:
+                labels = check_labels(a, rad.text())
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Labels", str(e))
+                continue
+            self._last_labels = (a, rad.text().strip())
+            return labels
+
     def _export_tag_to_imu(self, path, lo, hi):
         d = self.data
+        labels = self._ask_labels()
+        if labels is None:
+            return
         rate = self.rate_spin.value() if self.sync_mode.currentIndex() == 1 else None
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         try:
@@ -1848,13 +1907,14 @@ class Viewer(QtWidgets.QMainWindow):
             write_tag_to_imu_csv(d, res, path, rate, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
                                                       "gap_factor": self.gap_spin.value(), "notes": notes,
                                                       "autopilot_timed": self._fcu_reports},
-                                 sidecar=self.json_check.isChecked())
+                                 sidecar=self.json_check.isChecked(), action=labels[0], approx_diam=labels[1])
         except Exception as e:  # noqa: BLE001
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, "Export failed", str(e))
             return
         QtWidgets.QApplication.restoreOverrideCursor()
-        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 2} columns"
+        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 4} columns, "
+               f"action={labels[0] or '(blank)'}, approx_diam={labels[1] if labels[1] else '(blank)'}"
                f"  ·  {'; '.join(notes)}")
         print("[bagsync] " + msg)
         self.statusBar().showMessage(msg, 15000)
