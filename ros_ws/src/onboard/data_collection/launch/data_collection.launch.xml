@@ -1,8 +1,8 @@
 <launch>
   <arg name="use_camera" default="true"/>
-  <arg name="use_sonar" default="true"/>
+  <arg name="use_sonar" default="false"/>
   <arg name="use_apriltag" default="false"/>
-  <arg name="use_tag_zero_frames" default="false"/>
+  <arg name="use_tag_zero_frames" default="true"/>
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14551@"/>
 

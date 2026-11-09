@@ -13,12 +13,6 @@ Two ways to give them:
      RECORDING, balanced by label: each direction / circle-size combination ("left 7.5 m", "straight",
      "unlabelled", ...) is spread over train / val / test in the --val_frac / --test_frac proportions
      (a combination with only 1-2 recordings can't be spread; that is reported).
-       --group_by REGEX   the TEST set is made of whole groups: recordings whose path (relative to
-                          --data_dir) gives the same match, e.g. "^[^/]+" = same top-level subfolder
-                          (one folder per day), or "\\d+_\\d+_\\d+" = same date in the name. Holding out
-                          whole days tests how the model does on a NEW day (tag mounting, water,
-                          calibration), not a familiar one. Val only picks the best epoch, so it is
-                          still drawn by recording (label-balanced) from the other days.
        --seed             the split is random but repeatable
        --split_file PATH  reuse a saved split instead of making one
      The split used is saved next to the checkpoint as <out>_split.json.
@@ -75,7 +69,6 @@ Models (--model): rnn (plain Elman), gru, lstm. "Stateless" = nothing is carried
 
 Usage:
     python train_rnn.py --data_dir data/all --model gru
-    python train_rnn.py --data_dir data/all --group_by "^[^/]+" --test_frac 0.33 --out runs/day_out.pt
     python train_rnn.py --train_dir data/train --val_dir data/val --test_dir data/test --model gru
     python train_rnn.py --data_dir data/all --target action diam            (window 32, warmup 16, stride 16)
     python train_rnn.py --data_dir data/all --window 65 --warmup 32         (1 s buffer)
@@ -308,7 +301,8 @@ def load_csv(path, in_cols, out_cols, heads):
     df = pd.read_csv(path)
     absent = [c for c in in_cols if c not in df.columns]
     # (label columns may be missing or blank: unlabelled recordings still train the measured targets)
-    missing = [c for c in absent if not c.startswith("derived/tf[")] + [c for c in out_cols if c not in df.columns]
+    missing = ([c for c in absent if not c.startswith("derived/tf[")]
+               + [c for c in out_cols if c not in df.columns])
     if missing:
         raise ValueError(f"{name}: missing columns, e.g. {missing[:3]}")
     if absent:                                      # whole tags absent from this recording
@@ -424,9 +418,8 @@ def recording_stratum(path):
     return f"{a} {diam_name(vals[cnt.argmax()])}"
 
 
-def split_recordings(data_dir, val_frac, test_frac, seed, group_by=None):
-    """Split every CSV under data_dir by whole recording (or group), balanced by label combination.
-    Returns ({split: [paths]}, info dict). See the module docstring."""
+def split_recordings(data_dir, val_frac, test_frac, seed):
+    """Split every CSV under data_dir by whole recording, balanced by label combination."""
     root = os.path.expanduser(data_dir)
     if not os.path.isdir(root):
         raise SystemExit(f"Folder not found: {data_dir}")
@@ -434,14 +427,8 @@ def split_recordings(data_dir, val_frac, test_frac, seed, group_by=None):
     if not files:
         raise SystemExit(f"No CSV files found in {data_dir}")
     rel = {f: os.path.relpath(f, root).replace(os.sep, "/") for f in files}
-    # units = groups of recordings that must stay together
-    units = defaultdict(list)
-    for f in files:
-        m = re.search(group_by, rel[f]) if group_by else None
-        units[(m.group(1) if m and m.groups() else m.group(0)) if m else rel[f]].append(f)
     strata = {f: recording_stratum(f) for f in progress(files, desc="reading labels")}
     rng = random.Random(seed)
-    size = {k: len(fs) for k, fs in units.items()}
     fracs = {"train": 1 - val_frac - test_frac, "val": val_frac, "test": test_frac}
     if min(fracs.values()) < 0:
         raise SystemExit("--val_frac and --test_frac leave nothing for training")
@@ -476,35 +463,11 @@ def split_recordings(data_dir, val_frac, test_frac, seed, group_by=None):
                 glob_cnt[s] += base[s]
         return out
 
-    def train_val(rest, test_share):
-        """Split what's left after the test set into train / val (val_frac of ALL recordings)."""
-        v = min(val_frac / max(1 - test_share, 1e-9), 1.0)
-        return balanced(rest, {"train": 1 - v, "val": v, "test": 0.0})
-
-    if group_by:
-        # TEST = whole groups (e.g. days, which hold mixed labels: shared out by size, largest first).
-        # VAL only picks the best epoch, so it is drawn by recording, label-balanced, from the remaining
-        # groups; with few days this leaves far more to train on than holding out a val day too.
-        keys = sorted(units)
-        rng.shuffle(keys)
-        keys.sort(key=lambda k: -size[k])
-        test_keys, n_test = [], 0
-        for k in keys:                                    # add groups while that gets closer to test_frac
-            if abs(n_test + size[k] - test_frac * len(files)) < abs(n_test - test_frac * len(files)):
-                test_keys.append(k)
-                n_test += size[k]
-        test = [f for k in test_keys for f in units[k]]
-        rest = [f for f in files if f not in set(test)]
-        assign = {f: "test" for f in test}
-        assign.update(train_val(rest, len(test) / len(files)))
-    else:
-        assign = balanced(files, fracs)
+    assign = balanced(files, fracs)
     sets = {s: sorted(f for f in files if assign[f] == s) for s in SPLITS}
     info = {"data_dir": os.path.abspath(root), "seed": seed, "val_frac": val_frac, "test_frac": test_frac,
-            "group_by": group_by,
             "splits": {s: [rel[f] for f in sets[s]] for s in SPLITS},
-            "strata": {rel[f]: strata[f] for f in files},
-            "groups": {k: [rel[f] for f in fs] for k, fs in units.items()} if group_by else None}
+            "strata": {rel[f]: strata[f] for f in files}}
     return sets, info
 
 
@@ -516,9 +479,7 @@ def print_split(sets, info):
     for s in SPLITS:
         for f in sets[s]:
             rows[strata[os.path.relpath(f, root).replace(os.sep, "/")]][s] += 1
-    print(f"Split of {sum(len(v) for v in sets.values())} recordings"
-          + (f" ({len(info['groups'])} groups by {info['group_by']!r})" if info.get("groups") else "")
-          + f", seed {info['seed']}:")
+    print(f"Split of {sum(len(v) for v in sets.values())} recordings, seed {info['seed']}:")
     print(f"  {'label':18s}" + "".join(f"{s:>7s}" for s in SPLITS))
     for st in sorted(rows):
         r = rows[st]
@@ -706,6 +667,7 @@ class RecurrentModel(nn.Module):
 
 def build_model(n_in, n_out, a):
     """Create the model chosen by --model, using the other args for its size."""
+    # Keep use_diff support for existing checkpoints; it is no longer a training CLI option.
     extra = dict(use_diff=a.get("use_diff", False), in_dropout=a.get("in_dropout", 0.0))
     return RecurrentModel(n_in, n_out, a["hidden"], a["layers"], a["model"], a["dropout"], **extra)
 
@@ -723,18 +685,16 @@ def head_slices(n_reg, heads):
 # Train / evaluate
 # ---------------------------------------------------------------------------
 def run_epoch(model, loader, device, y_std, n_reg, heads, optimizer=None, clip=1.0, desc=None,
-              loss_kind="mse", huber_delta=1.0, class_w=None, label_smoothing=0.0, select="bacc"):
+              class_w=None, select="bacc"):
     """One pass over a loader. Trains if an optimizer is given, otherwise just scores.
 
-    Regression part: loss_kind ("mse" or "huber") on the scaled outputs (each divided by its training
-    std, so every output counts equally). Each classification head: cross-entropy (optionally
-    class-weighted, class_w = one weight tensor or None per head). All parts are added. Only scored
-    rows count (see WindowDataset). Returns a dict: scaled (scaled RMSE), rmse (original units),
-    heads (per head: ce = mean cross-entropy unweighted, acc = row accuracy, bacc = balanced accuracy =
-    the mean of each class's recall, conf = confusion matrix), score (what picks the best epoch, lower is
-    better): scaled RMSE plus, per head, 1 - bacc (select="bacc") or ce (select="ce").
-    label_smoothing (training loss only): the target puts this much probability on the other classes,
-    so the model isn't pushed toward 100 % certainty.
+    Regression uses MSE on scaled outputs (each divided by its training std, so every output counts
+    equally). Each classification head uses cross-entropy (optionally class-weighted, class_w = one
+    weight tensor or None per head). All parts are added. Only scored rows count (see WindowDataset).
+    Returns a dict: scaled (scaled RMSE), rmse (original units), heads (per head: ce = mean
+    cross-entropy unweighted, acc = row accuracy, bacc = balanced accuracy = the mean of each class's
+    recall, conf = confusion matrix), score (what picks the best epoch, lower is better): scaled RMSE
+    plus, per head, 1 - bacc (select="bacc") or ce (select="ce").
     """
     training = optimizer is not None
     model.train(training)
@@ -751,11 +711,7 @@ def run_epoch(model, loader, device, y_std, n_reg, heads, optimizer=None, clip=1
             if n_reg:
                 pr = pred[..., :n_reg]
                 sq = ((pr - y) ** 2) * m
-                if loss_kind == "huber":
-                    el = nn.functional.huber_loss(pr, y, reduction="none", delta=huber_delta) * m
-                    loss = loss + el.sum() / m.sum().clamp(min=1)
-                else:
-                    loss = loss + sq.sum() / m.sum().clamp(min=1)
+                loss = loss + sq.sum() / m.sum().clamp(min=1)
                 sum_sq_norm += sq.sum().item()
                 sum_sq_orig += (sq.detach() * y_std ** 2).sum().item()
                 n_vals += m.sum().item()
@@ -766,8 +722,7 @@ def run_epoch(model, loader, device, y_std, n_reg, heads, optimizer=None, clip=1
                 n = lab.sum()
                 if n == 0:
                     continue
-                loss = loss + nn.functional.cross_entropy(logits[lab], cf[lab], weight=class_w[h_i],
-                                                          label_smoothing=label_smoothing if training else 0.0)
+                loss = loss + nn.functional.cross_entropy(logits[lab], cf[lab], weight=class_w[h_i])
                 with torch.no_grad():
                     st = hs[h_i]
                     st["ce"] += nn.functional.cross_entropy(logits[lab], cf[lab], reduction="sum").item()
@@ -889,10 +844,6 @@ def main():
                                       "by recording, balanced by label")
     p.add_argument("--val_frac", type=float, default=0.15, help="--data_dir: share of recordings for val (0.15)")
     p.add_argument("--test_frac", type=float, default=0.15, help="--data_dir: share of recordings for test (0.15)")
-    p.add_argument("--group_by", metavar="REGEX",
-                   help="--data_dir: the test set is whole groups of recordings whose relative path gives the "
-                        "same match, e.g. '^[^/]+' (same subfolder = day) or '\\d+_\\d+_\\d+' (same date in "
-                        "the name); val is still drawn by recording from the other groups")
     p.add_argument("--split_file", help="reuse a split saved by an earlier run (<out>_split.json)")
     p.add_argument("--train_dir", help="folder of training recordings (instead of --data_dir)")
     p.add_argument("--val_dir", help="folder of validation recordings (picks the best epoch)")
@@ -921,8 +872,6 @@ def main():
                    help="fraction of hidden units randomly zeroed during training (e.g. 0.2)")
     p.add_argument("--weight_decay", type=float, default=0.0,
                    help="pulls weights toward zero each step (e.g. 1e-4 to 1e-2)")
-    p.add_argument("--use_diff", action="store_true",
-                   help="also feed the change in each input since the previous row; works live")
     p.add_argument("--in_dropout", type=float, default=0.0,
                    help="fraction of input values randomly zeroed during training (e.g. 0.1)")
     p.add_argument("--drop_tags", default="", metavar="N,N",
@@ -933,17 +882,10 @@ def main():
                         "accuracy, the mean of each class's recall, so a rare class counts as much as a common "
                         "one; ce = cross-entropy, which also rises when the model grows over-confident even "
                         "while it gets more answers right")
-    p.add_argument("--label_smoothing", type=float, default=0.0,
-                   help="classification: spread this much of the target probability over the other classes "
-                        "in the training loss (e.g. 0.1), so the model isn't pushed to 100%% certainty")
     p.add_argument("--patience", type=int,
                    help="stop when the val score hasn't improved for this many epochs (default: run all epochs)")
     p.add_argument("--ignore_inputs", nargs="+", default=[], metavar="NAME",
                    help="more columns NOT to use as inputs (besides t_s, dt_s)")
-    p.add_argument("--loss", choices=["mse", "huber"], default="mse",
-                   help="regression loss on the scaled outputs: mse (default) or huber")
-    p.add_argument("--huber_delta", type=float, default=1.0,
-                   help="huber only: where the loss turns linear, in units of each output's std")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default="checkpoint.pt", help="where to save the best model")
     args = p.parse_args()
@@ -972,8 +914,7 @@ def main():
         if args.split_file:
             sets, split_info = load_split_file(args.split_file)
         else:
-            sets, split_info = split_recordings(args.data_dir, args.val_frac, args.test_frac, args.seed,
-                                                args.group_by)
+            sets, split_info = split_recordings(args.data_dir, args.val_frac, args.test_frac, args.seed)
         print_split(sets, split_info)
         if not sets["train"]:
             raise SystemExit("The split left no training recordings.")
@@ -1051,7 +992,7 @@ def main():
           f"{len(train_dl.dataset)} / {len(val_dl.dataset) if val_dl else 0} / "
           f"{len(test_dl.dataset) if test_dl else 0} windows, {n_in} inputs -> {n_reg} regression + "
           f"{n_cls} class outputs, model={args.model}, dropout={args.dropout}, weight_decay={args.weight_decay}, "
-          f"use_diff={args.use_diff}, in_dropout={args.in_dropout}, loss={args.loss}, device={device}")
+          f"in_dropout={args.in_dropout}, regression_loss=MSE, device={device}")
 
     model = build_model(n_in, n_reg + n_cls, vars(args)).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -1065,8 +1006,7 @@ def main():
     best, best_epoch = float("inf"), 0
     for epoch in range(1, args.epochs + 1):
         tr = run_epoch(model, train_dl, device, y_std_t, optimizer=optimizer, desc=f"epoch {epoch}/{args.epochs} train",
-                       loss_kind=args.loss, huber_delta=args.huber_delta, class_w=class_w,
-                       label_smoothing=args.label_smoothing, **kw)
+                       class_w=class_w, **kw)
         history["train"].append(tr["score"])
         msg = f"epoch {epoch:3d}/{args.epochs}  train {fmt_scores(tr, n_reg, heads)}"
         score = tr["score"]
