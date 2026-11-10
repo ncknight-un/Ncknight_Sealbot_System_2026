@@ -15,6 +15,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy,
 )
+from mavros_msgs.msg import Mavlink
 from sensor_msgs.msg import FluidPressure, Imu
 
 
@@ -70,13 +71,19 @@ def describe(values):
 
 
 class TimingDiagnostic(Node):
-    def __init__(self, prefix, report_period, expected_hz):
+    def __init__(self, prefix, raw_topic, report_period, expected_hz):
         super().__init__("mavros_timing_diagnostic")
         self._expected_hz = expected_hz
         self._report_period = report_period
-        self._topics = {
+        self._sensor_topics = {
             "imu": TopicTiming(),
             "pressure": TopicTiming(),
+        }
+        self._raw_topics = {
+            27: TopicTiming(),
+            29: TopicTiming(),
+            30: TopicTiming(),
+            31: TopicTiming(),
         }
 
         imu_topic = f"{prefix}/imu/data"
@@ -90,9 +97,10 @@ class TimingDiagnostic(Node):
             lambda msg: self._record("pressure", msg),
             QOS,
         )
+        self.create_subscription(Mavlink, raw_topic, self._record_raw, QOS)
         self.create_timer(report_period, self._report)
         self.get_logger().info(
-            f"Monitoring {imu_topic} and {pressure_topic}; "
+            f"Monitoring {imu_topic}, {pressure_topic}, and {raw_topic}; "
             f"expected rate={expected_hz:g} Hz, report period={report_period:g} s"
         )
         if self.get_parameter("use_sim_time").value:
@@ -101,11 +109,25 @@ class TimingDiagnostic(Node):
             )
 
     def _record(self, name, msg):
-        self._topics[name].record(msg, self.get_clock().now().nanoseconds)
+        self._sensor_topics[name].record(msg, self.get_clock().now().nanoseconds)
+
+    def _record_raw(self, msg):
+        topic = self._raw_topics.get(msg.msgid)
+        if topic is not None:
+            topic.record(msg, self.get_clock().now().nanoseconds)
 
     def _report(self):
         expected_period_ms = 1000.0 / self._expected_hz
-        for name, topic in self._topics.items():
+        raw_names = {
+            27: "raw/RAW_IMU(27)",
+            29: "raw/SCALED_PRESSURE(29)",
+            30: "raw/ATTITUDE(30)",
+            31: "raw/ATTITUDE_QUATERNION(31)",
+        }
+        for name, topic in (
+            list(self._sensor_topics.items())
+            + [(raw_names[msgid], topic) for msgid, topic in self._raw_topics.items()]
+        ):
             rate = topic.count / self._report_period
             bursts = sum(
                 interval < expected_period_ms * 0.5
@@ -145,6 +167,11 @@ def main(args=None):
         help="Expected rate used to flag burst/gap intervals (default: 100)",
     )
     parser.add_argument(
+        "--raw-topic",
+        default="/uas1/mavlink_source",
+        help="Raw MAVLink topic (default: /uas1/mavlink_source)",
+    )
+    parser.add_argument(
         "--report-period",
         type=float,
         default=10.0,
@@ -156,7 +183,9 @@ def main(args=None):
 
     prefix = "/" + options.prefix.strip("/")
     rclpy.init(args=ros_args)
-    node = TimingDiagnostic(prefix, options.report_period, options.expected_hz)
+    node = TimingDiagnostic(
+        prefix, options.raw_topic, options.report_period, options.expected_hz
+    )
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
