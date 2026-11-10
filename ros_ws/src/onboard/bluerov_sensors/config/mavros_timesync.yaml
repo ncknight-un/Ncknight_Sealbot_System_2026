@@ -1,0 +1,5 @@
+/**/time:
+  ros__parameters:
+    timesync_mode: MAVLINK
+    timesync_rate: 10.0
+    max_rtt_sample: 60

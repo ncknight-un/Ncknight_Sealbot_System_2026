@@ -21,9 +21,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -64,31 +63,38 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "surface_pressure", default_value="0.0",
             description="Surface reference pressure in Pa (0 = auto-zero at startup)"),
-        # Timesync is disabled: the tether link latency is too high and variable,
-        # so its clock-offset estimate drifted and made measurement stamps less
-        # accurate than stamping on arrival. Set false to re-enable.
         DeclareLaunchArgument(
-            "disable_timesync", default_value="true",
-            description="Turn off MAVROS timesync (data then stamped on arrival, not when measured)"),
+            "disable_timesync", default_value="false",
+            description="Disable MAVROS timesync (true stamps MAVROS data on arrival)"),
         DeclareLaunchArgument(
             "latency_period", default_value="1.0",
             description="Seconds between link latency probes, shown in [STATUS] (0 = off)"),
     ]
 
     # ------------------------------------------------------------------
-    # MAVROS: reuse the stock ArduPilot launch so plugin lists and
-    # config match what you get from `ros2 launch mavros apm.launch`.
+    mavros_share = get_package_share_directory("mavros")
+    sensors_share = get_package_share_directory("bluerov_sensors")
+
+    # Load the stock ArduPilot plugin/config files, then override the sys_time
+    # plugin's RTT threshold and timesync settings for this tether link.
     # ------------------------------------------------------------------
-    mavros = IncludeLaunchDescription(
-        AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("mavros"), "launch", "apm.launch")),
-        launch_arguments={
-            "fcu_url": LaunchConfiguration("fcu_url"),
-            "gcs_url": LaunchConfiguration("gcs_url"),
-            "namespace": LaunchConfiguration("mavros_ns"),
-            "tgt_system": "1",
-            "tgt_component": "1",
-        }.items(),
+    mavros = Node(
+        package="mavros",
+        executable="mavros_node",
+        namespace=LaunchConfiguration("mavros_ns"),
+        output="screen",
+        parameters=[
+            {
+                "fcu_url": LaunchConfiguration("fcu_url"),
+                "gcs_url": LaunchConfiguration("gcs_url"),
+                "tgt_system": 1,
+                "tgt_component": 1,
+                "fcu_protocol": "v2.0",
+            },
+            os.path.join(mavros_share, "launch", "apm_pluginlists.yaml"),
+            os.path.join(mavros_share, "launch", "apm_config.yaml"),
+            os.path.join(sensors_share, "config", "mavros_timesync.yaml"),
+        ],
         condition=IfCondition(LaunchConfiguration("start_mavros")),
     )
 
