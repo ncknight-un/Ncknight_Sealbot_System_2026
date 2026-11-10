@@ -4,6 +4,7 @@
 import argparse
 import math
 import statistics
+import struct
 import time
 
 import rclpy
@@ -33,9 +34,12 @@ class TopicTiming:
         self.arrival_intervals_ms = []
         self.header_intervals_ms = []
         self.header_age_ms = []
+        self.fcu_intervals_ms = []
         self.nonmonotonic_headers = 0
+        self.nonmonotonic_fcu = 0
         self.last_arrival_ns = None
         self.last_header_ns = None
+        self.last_fcu_time = None
 
     def record(self, msg, now_ros_ns):
         arrival_ns = time.monotonic_ns()
@@ -56,6 +60,17 @@ class TopicTiming:
                 self.header_intervals_ms.append(delta_ns / 1_000_000.0)
             self.last_header_ns = header_ns
             self.header_age_ms.append((now_ros_ns - header_ns) / 1_000_000.0)
+
+    def record_fcu(self, fcu_time, ns_per_unit, wraps):
+        if self.last_fcu_time is not None:
+            delta = fcu_time - self.last_fcu_time
+            if wraps and delta < -(1 << 31):
+                delta += 1 << 32
+            if delta <= 0:
+                self.nonmonotonic_fcu += 1
+            else:
+                self.fcu_intervals_ms.append(delta * ns_per_unit / 1_000_000.0)
+        self.last_fcu_time = fcu_time
 
 
 def describe(values):
@@ -79,12 +94,7 @@ class TimingDiagnostic(Node):
             "imu": TopicTiming(),
             "pressure": TopicTiming(),
         }
-        self._raw_topics = {
-            27: TopicTiming(),
-            29: TopicTiming(),
-            30: TopicTiming(),
-            31: TopicTiming(),
-        }
+        self._raw_topics = {27: TopicTiming(), 29: TopicTiming(), 30: TopicTiming()}
 
         imu_topic = f"{prefix}/imu/data"
         pressure_topic = f"{prefix}/imu/static_pressure"
@@ -115,6 +125,13 @@ class TimingDiagnostic(Node):
         topic = self._raw_topics.get(msg.msgid)
         if topic is not None:
             topic.record(msg, self.get_clock().now().nanoseconds)
+            payload = b"".join(
+                int(word).to_bytes(8, byteorder="little") for word in msg.payload64
+            )
+            if msg.msgid == 27 and msg.len >= 8:
+                topic.record_fcu(struct.unpack_from("<Q", payload)[0], 1_000, False)
+            elif msg.len >= 4:
+                topic.record_fcu(struct.unpack_from("<I", payload)[0], 1_000_000, True)
 
     def _report(self):
         expected_period_ms = 1000.0 / self._expected_hz
@@ -122,7 +139,6 @@ class TimingDiagnostic(Node):
             27: "raw/RAW_IMU(27)",
             29: "raw/SCALED_PRESSURE(29)",
             30: "raw/ATTITUDE(30)",
-            31: "raw/ATTITUDE_QUATERNION(31)",
         }
         for name, topic in (
             list(self._sensor_topics.items())
@@ -144,13 +160,17 @@ class TimingDiagnostic(Node):
                 f"gaps(>{expected_period_ms * 1.5:.1f}ms)={gaps} | "
                 f"header interval ms [{describe(topic.header_intervals_ms)}] "
                 f"nonmonotonic={topic.nonmonotonic_headers} | "
-                f"header age ms [{describe(topic.header_age_ms)}]"
+                f"header age ms [{describe(topic.header_age_ms)}] | "
+                f"FCU sample interval ms [{describe(topic.fcu_intervals_ms)}] "
+                f"nonmonotonic={topic.nonmonotonic_fcu}"
             )
             topic.count = 0
             topic.arrival_intervals_ms.clear()
             topic.header_intervals_ms.clear()
             topic.header_age_ms.clear()
+            topic.fcu_intervals_ms.clear()
             topic.nonmonotonic_headers = 0
+            topic.nonmonotonic_fcu = 0
 
 
 def main(args=None):
