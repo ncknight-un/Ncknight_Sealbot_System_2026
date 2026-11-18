@@ -1,3 +1,27 @@
+<launch>
+  <arg name="use_camera" default="true"/>
+  <arg name="use_apriltag" default="true"/>
+
+  <!-- One shared container for camera + GPU perception -->
+  <node_container pkg="rclcpp_components" exec="component_container_mt"
+                  name="vision_container" namespace="/" output="screen"/>
+
+  <!-- Camera -->
+  <load_composable_node target="/vision_container" if="$(var use_camera)">
+    <composable_node pkg="vimbax_camera" plugin="vimbax_camera::VimbaXCameraNode"
+                     name="sealbot_camera" namespace="camera">
+      <param name="camera_id" value="DEV_1AB22C0B5BB3" />
+      <param name="camera_frame_id" value="camera_optical_frame" />
+      <param name="sync_camera_time" value="true" />
+      <param name="use_ros_time" value="true" />
+      <param name="settings_file" value="$(find-pkg-share camera_bringup)/config/cleanparams10_20_ROI.xml" />
+      <param name="camera_info_url" value="file://$(find-pkg-share camera_bringup)/config/camera_info10_20_ROI.yaml" />
+      <remap from="/camera/sealbot_camera/image_raw" to="/camera/image_raw" />
+      <remap from="/camera/sealbot_camera/camera_info" to="/camera/camera_info" />
+      <extra_arg name="use_intra_process_comms" value="true" />
+    </composable_node>
+  </load_composable_node>
+
   <!-- GPU: mono8 -> rgb8, rectify, AprilTag -->
   <load_composable_node target="/vision_container" if="$(var use_apriltag)">
 
@@ -28,3 +52,4 @@
     </composable_node>
 
   </load_composable_node>
+</launch>

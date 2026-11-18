@@ -3,147 +3,147 @@
 /**:
   ros__parameters:
     camera_frame: camera_optical_frame
-    calibrated_at: '2026-10-20T22:48:35'
+    calibrated_at: '2026-11-17T22:25:24'
     duration: 5.0
     tag_frames: [tag_0, tag_1, tag_2, tag_3, tag_4, tag_5, tag_6, tag_7, tag_8, tag_9, tag_10, tag_11, tag_12, tag_13, tag_14, tag_15, tag_16, tag_17, tag_18, tag_20]
     tags:
       tag_0:
         zero_frame: tag_0_zero
-        translation: [-0.000100, 0.052375, 0.190836]
-        rotation: [0.88008546, -0.05689720, -0.02237658, 0.47086259]
-        samples: 119
-        translation_std: [0.000001, 0.000014, 0.000050]
-        rotation_std_deg: 0.0895
+        translation: [-0.002822, 0.046385, 0.191645]
+        rotation: [0.88250262, 0.01095910, -0.01169310, 0.47003435]
+        samples: 120
+        translation_std: [0.000001, 0.000010, 0.000041]
+        rotation_std_deg: 0.0698
       tag_1:
         zero_frame: tag_1_zero
-        translation: [0.030086, -0.015657, 0.209966]
-        rotation: [0.86517712, -0.00154254, -0.50092080, 0.02333519]
-        samples: 119
-        translation_std: [0.000019, 0.000010, 0.000133]
-        rotation_std_deg: 0.1034
+        translation: [0.031822, -0.023010, 0.209135]
+        rotation: [0.88173390, 0.01621345, -0.47130454, 0.01242932]
+        samples: 120
+        translation_std: [0.000017, 0.000012, 0.000109]
+        rotation_std_deg: 0.0941
       tag_2:
         zero_frame: tag_2_zero
-        translation: [0.039322, -0.016942, 0.193830]
-        rotation: [0.89086514, -0.00443625, -0.44862235, 0.07125735]
-        samples: 119
-        translation_std: [0.000017, 0.000008, 0.000086]
-        rotation_std_deg: 0.0797
+        translation: [0.041694, -0.023393, 0.195441]
+        rotation: [0.88529609, -0.01804830, -0.46437958, 0.01663414]
+        samples: 120
+        translation_std: [0.000015, 0.000008, 0.000069]
+        rotation_std_deg: 0.0701
       tag_3:
         zero_frame: tag_3_zero
-        translation: [0.050660, -0.017323, 0.180923]
-        rotation: [0.90954862, 0.02275021, -0.41244552, 0.04574311]
-        samples: 119
-        translation_std: [0.000027, 0.000009, 0.000097]
-        rotation_std_deg: 0.1584
+        translation: [0.051732, -0.023600, 0.180111]
+        rotation: [0.89274620, -0.03169884, -0.44816194, 0.03391584]
+        samples: 120
+        translation_std: [0.000031, 0.000014, 0.000108]
+        rotation_std_deg: 0.1398
       tag_4:
         zero_frame: tag_4_zero
-        translation: [0.031318, 0.001691, 0.208448]
-        rotation: [0.87479249, -0.01197614, -0.48431557, 0.00575309]
-        samples: 119
-        translation_std: [0.000014, 0.000002, 0.000094]
-        rotation_std_deg: 0.0847
+        translation: [0.032566, -0.006274, 0.209731]
+        rotation: [-0.87103048, -0.00117991, 0.49065730, 0.02366288]
+        samples: 120
+        translation_std: [0.000014, 0.000003, 0.000091]
+        rotation_std_deg: 0.0987
       tag_5:
         zero_frame: tag_5_zero
-        translation: [0.040665, 0.001107, 0.194314]
-        rotation: [0.88958180, -0.02837394, -0.45573315, 0.01210100]
-        samples: 119
-        translation_std: [0.000015, 0.000002, 0.000068]
-        rotation_std_deg: 0.0853
+        translation: [0.042579, -0.005969, 0.195455]
+        rotation: [0.88184621, -0.04407263, -0.46937598, 0.00954267]
+        samples: 120
+        translation_std: [0.000017, 0.000003, 0.000079]
+        rotation_std_deg: 0.0918
       tag_6:
         zero_frame: tag_6_zero
-        translation: [0.051475, -0.000626, 0.179825]
-        rotation: [-0.90870622, 0.00203281, 0.41729604, 0.01062545]
-        samples: 119
-        translation_std: [0.000018, 0.000001, 0.000062]
-        rotation_std_deg: 0.1744
+        translation: [0.052414, -0.007029, 0.181619]
+        rotation: [0.89545471, -0.04497236, -0.44286384, 0.00315778]
+        samples: 120
+        translation_std: [0.000018, 0.000003, 0.000062]
+        rotation_std_deg: 0.1593
       tag_7:
         zero_frame: tag_7_zero
-        translation: [0.032144, 0.019219, 0.208581]
-        rotation: [-0.88074256, 0.02834930, 0.47214421, 0.02384758]
-        samples: 119
-        translation_std: [0.000020, 0.000012, 0.000130]
-        rotation_std_deg: 0.1070
+        translation: [0.033583, 0.011654, 0.210032]
+        rotation: [-0.87209893, 0.04955404, 0.48543829, 0.03657218]
+        samples: 120
+        translation_std: [0.000022, 0.000008, 0.000132]
+        rotation_std_deg: 0.1131
       tag_8:
         zero_frame: tag_8_zero
-        translation: [0.041793, 0.018233, 0.194500]
-        rotation: [-0.89243105, 0.00523683, 0.45042397, 0.02564436]
-        samples: 119
-        translation_std: [0.000016, 0.000007, 0.000073]
-        rotation_std_deg: 0.0868
+        translation: [0.042494, 0.010544, 0.196935]
+        rotation: [-0.88349890, 0.03672306, 0.46491740, 0.04396509]
+        samples: 120
+        translation_std: [0.000016, 0.000004, 0.000074]
+        rotation_std_deg: 0.0821
       tag_9:
         zero_frame: tag_9_zero
-        translation: [0.051794, 0.017529, 0.180138]
-        rotation: [-0.91219912, 0.02238096, 0.40887608, 0.01456768]
-        samples: 119
-        translation_std: [0.000024, 0.000007, 0.000079]
-        rotation_std_deg: 0.1854
+        translation: [0.052977, 0.011245, 0.182778]
+        rotation: [-0.89112767, 0.00876843, 0.45208160, 0.03790534]
+        samples: 120
+        translation_std: [0.000025, 0.000006, 0.000090]
+        rotation_std_deg: 0.1599
       tag_10:
         zero_frame: tag_10_zero
-        translation: [-0.041895, -0.012831, 0.206773]
-        rotation: [0.86003706, -0.00837730, 0.50995795, 0.01445559]
-        samples: 119
-        translation_std: [0.000016, 0.000005, 0.000080]
-        rotation_std_deg: 0.0828
+        translation: [-0.041788, -0.020664, 0.206750]
+        rotation: [0.88076675, -0.00437087, 0.47322710, 0.01693914]
+        samples: 120
+        translation_std: [0.000017, 0.000009, 0.000086]
+        rotation_std_deg: 0.0822
       tag_11:
         zero_frame: tag_11_zero
-        translation: [-0.051277, -0.012539, 0.191864]
-        rotation: [0.87982545, -0.00366439, 0.47459708, 0.02552183]
-        samples: 119
-        translation_std: [0.000017, 0.000004, 0.000063]
-        rotation_std_deg: 0.0986
+        translation: [-0.050801, -0.020834, 0.192701]
+        rotation: [0.87787762, -0.02501816, 0.47809054, 0.01159358]
+        samples: 120
+        translation_std: [0.000015, 0.000006, 0.000057]
+        rotation_std_deg: 0.0805
       tag_12:
         zero_frame: tag_12_zero
-        translation: [-0.060964, -0.013007, 0.176386]
-        rotation: [0.88094105, -0.00122473, 0.47119363, 0.04379421]
-        samples: 119
-        translation_std: [0.000056, 0.000011, 0.000163]
-        rotation_std_deg: 0.2924
+        translation: [-0.059670, -0.020373, 0.178281]
+        rotation: [0.88717804, -0.03796478, 0.45942198, 0.02013081]
+        samples: 120
+        translation_std: [0.000033, 0.000011, 0.000101]
+        rotation_std_deg: 0.1799
       tag_13:
         zero_frame: tag_13_zero
-        translation: [-0.041780, 0.003898, 0.207088]
-        rotation: [0.86245826, 0.00163130, 0.50608995, 0.00600364]
-        samples: 119
-        translation_std: [0.000014, 0.000002, 0.000070]
-        rotation_std_deg: 0.0699
+        translation: [-0.041232, -0.003875, 0.207579]
+        rotation: [-0.86473729, 0.03345047, -0.50087597, 0.01528886]
+        samples: 120
+        translation_std: [0.000012, 0.000002, 0.000062]
+        rotation_std_deg: 0.0625
       tag_14:
         zero_frame: tag_14_zero
-        translation: [-0.050858, 0.004245, 0.192027]
-        rotation: [-0.87996557, 0.03082899, -0.47365404, 0.01902695]
-        samples: 119
-        translation_std: [0.000013, 0.000002, 0.000052]
-        rotation_std_deg: 0.0900
+        translation: [-0.050458, -0.004260, 0.193306]
+        rotation: [-0.87673016, 0.00978435, -0.48059275, 0.01670621]
+        samples: 120
+        translation_std: [0.000012, 0.000002, 0.000047]
+        rotation_std_deg: 0.1009
       tag_15:
         zero_frame: tag_15_zero
-        translation: [-0.060528, 0.004007, 0.176976]
-        rotation: [0.89194069, 0.00016492, 0.45210251, 0.00671519]
-        samples: 119
-        translation_std: [0.000025, 0.000002, 0.000069]
-        rotation_std_deg: 0.3819
+        translation: [-0.060057, -0.003022, 0.178926]
+        rotation: [-0.88540658, 0.04048326, -0.46302273, 0.00512379]
+        samples: 120
+        translation_std: [0.000018, 0.000002, 0.000053]
+        rotation_std_deg: 0.2534
       tag_16:
         zero_frame: tag_16_zero
-        translation: [-0.041966, 0.022243, 0.206031]
-        rotation: [-0.85543149, -0.03380696, -0.51295130, 0.06304775]
-        samples: 119
-        translation_std: [0.000021, 0.000011, 0.000100]
-        rotation_std_deg: 0.0797
+        translation: [-0.041143, 0.013280, 0.208037]
+        rotation: [0.86794488, 0.00899253, 0.49655796, 0.00458529]
+        samples: 120
+        translation_std: [0.000016, 0.000005, 0.000081]
+        rotation_std_deg: 0.0775
       tag_17:
         zero_frame: tag_17_zero
-        translation: [-0.050597, 0.022378, 0.191378]
-        rotation: [-0.86518792, 0.01810370, -0.49617812, 0.07020968]
-        samples: 119
-        translation_std: [0.000029, 0.000013, 0.000108]
-        rotation_std_deg: 0.0969
+        translation: [-0.050549, 0.013770, 0.193629]
+        rotation: [-0.87878931, -0.01140455, -0.47661974, 0.02080655]
+        samples: 120
+        translation_std: [0.000015, 0.000004, 0.000057]
+        rotation_std_deg: 0.0921
       tag_18:
         zero_frame: tag_18_zero
-        translation: [-0.060106, 0.022267, 0.175946]
-        rotation: [-0.90069511, -0.00578684, -0.43079334, 0.05596363]
-        samples: 119
-        translation_std: [0.000061, 0.000022, 0.000180]
-        rotation_std_deg: 0.2572
+        translation: [-0.059586, 0.013632, 0.179642]
+        rotation: [-0.89445556, 0.00322552, -0.44713397, 0.00317169]
+        samples: 120
+        translation_std: [0.000040, 0.000009, 0.000124]
+        rotation_std_deg: 0.3462
       tag_20:
         zero_frame: tag_20_zero
-        translation: [-0.007796, -0.049391, 0.185943]
-        rotation: [-0.87319226, -0.01367105, -0.03714892, 0.48576572]
-        samples: 119
-        translation_std: [0.000002, 0.000014, 0.000051]
-        rotation_std_deg: 0.0869
+        translation: [-0.005032, -0.054330, 0.189527]
+        rotation: [-0.88370534, -0.02947173, -0.03576573, 0.46574360]
+        samples: 120
+        translation_std: [0.000002, 0.000019, 0.000065]
+        rotation_std_deg: 0.1084

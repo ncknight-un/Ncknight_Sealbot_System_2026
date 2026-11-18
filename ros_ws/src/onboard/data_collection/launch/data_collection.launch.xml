@@ -18,7 +18,7 @@
   </include>
 
   <!-- Camera + GPU perception in one container -->
-  <include file="$(find-pkg-share apriltag_bringup)/launch/vision.launch.xml">
+  <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
     <arg name="use_camera" value="$(var use_camera)"/>
     <arg name="use_apriltag" value="$(var use_apriltag)"/>
   </include>
