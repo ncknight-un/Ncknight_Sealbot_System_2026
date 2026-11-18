@@ -9,16 +9,19 @@
   <!-- Frames first, so TF is available when sensors start publishing -->
   <include file="$(find-pkg-share data_collection)/launch/vehicle_description.launch.xml"/>
 
-  <!-- Sensors (Ping360 & Camera)-->
+  <!-- Sensors (sonar + MAVROS); camera now lives in vision.launch.xml -->
   <include file="$(find-pkg-share data_collection)/launch/sensors.launch.xml">
-    <arg name="use_camera" value="$(var use_camera)"/>
+    <arg name="use_camera" value="false"/>
     <arg name="use_sonar" value="$(var use_sonar)"/>
     <arg name="start_mavros" value="$(var start_mavros)"/>
     <arg name="fcu_url" value="$(var fcu_url)"/>
   </include>
 
-  <!-- Perception (rectify + AprilTag); needs use_camera -->
-  <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag_isaac.launch.xml" if="$(var use_apriltag)"/>
+  <!-- Camera + GPU perception in one container -->
+  <include file="$(find-pkg-share apriltag_bringup)/launch/vision.launch.xml">
+    <arg name="use_camera" value="$(var use_camera)"/>
+    <arg name="use_apriltag" value="$(var use_apriltag)"/>
+  </include>
 
   <!-- Panel zero frames (camera_optical_frame -> tag_N_zero) from config/panel_zero.yaml;
        run panel_calibration and rebuild first -->
