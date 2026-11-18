@@ -43,7 +43,8 @@ from sync_export import (REFERENCE_TAGS, DERIVED_IMU, DERIVED_THR, GAP_FACTOR, H
                          heading_series, gravity_removed_series, turn_series, tag_pixel_position, tf_frames, tf_pair_series, tf_tree_series,
                          tf_tree_text, imu_summary, integrate_imu, sync, thruster_series, write_csv,
                          TAG_IMU_FORMAT, tag_to_imu_sync, write_tag_to_imu_csv, ACTIONS, check_labels,
-                         clock_report)
+                         FLOW_FORMAT, FLOW_TESTS, WALL_SIDES, NO_WALL, NO_ANGLE, NO_ATTACHMENT, check_flow_labels, labels_text,
+                         write_flow_class_csv, clock_report)
 from fcutime import fcu_text, fcu_time_series
 
 try:
@@ -564,15 +565,26 @@ class Viewer(QtWidgets.QMainWindow):
             lambda i: (self.rate_spin.setEnabled(i == 1), self._update_window_label()))
         self.rate_spin.valueChanged.connect(lambda *_: self._update_window_label())
         self.cols_mode = QtWidgets.QComboBox()
-        self.cols_mode.addItems(["Export all fields", "Export ticked fields only", TAG_IMU_FORMAT])
-        self.cols_mode.setItemData(2, (
+        self.cols_mode.addItems(["Export all fields", "Export ticked fields only", TAG_IMU_FORMAT, FLOW_FORMAT])
+        compact = (
             "t_s (seconds since Start; the first row is 0), dt_s (seconds since the previous camera\n"
             "frame), then every tag's deviation from its zero frame (translation x/y/z mm +\n"
             "quaternion x/y/z/w and a seen flag, sorted by tag number), then the IMU with gravity\n"
             "removed (derived/imu/data/gravity_removed: linear_acceleration, angular_velocity), depth\n"
-            "from global_position/local (pose z, negative underwater), the turn rate averaged over the\n"
-            "last 5 s (derived/turn.turn_rate_avg), and the two labels you type\n"
-            "in when exporting: action (straight/right/left) and approx_diam (circle diameter, m).\n"
+            "from global_position/local (pose z, negative underwater) and the turn rate averaged over\n"
+            "the last 5 s (derived/turn.turn_rate_avg).\n")
+        self.cols_mode.setItemData(2, (
+            "For turning and straight runs.\n" + compact +
+            "Last, the two labels you type in when exporting: action (straight/right/left) and\n"
+            "approx_diam (circle diameter, m; -1 for straight).\n"
+            "'Include IMU velocity' is ignored."),
+            QtCore.Qt.ItemDataRole.ToolTipRole)
+        self.cols_mode.setItemData(3, (
+            "For the dist_to_wall and angle_to_head tests. The same columns as tag_to_imu_format:\n" + compact +
+            "Last, five label columns, the same in every export: test, wall_side (right/none/left),\n"
+            "dist_to_wall (m), angle_to_head (deg, or none = attachment not connected), dist_to_head (m).\n"
+            "You pick the test and type its\n"
+            "two labels when exporting; the other test's two columns are left blank.\n"
             "'Include IMU velocity' is ignored."),
             QtCore.Qt.ItemDataRole.ToolTipRole)
         self.gap_spin = QtWidgets.QDoubleSpinBox(decimals=1, value=GAP_FACTOR, prefix="gap × ")
@@ -1810,14 +1822,14 @@ class Viewer(QtWidgets.QMainWindow):
         if not d:
             return
         lo, hi = self.start_spin.value(), self.stop_spin.value()
-        tag_imu = self.cols_mode.currentIndex() == 2
-        suffix = f"_{TAG_IMU_FORMAT}" if tag_imu else ""
+        compact = {2: TAG_IMU_FORMAT, 3: FLOW_FORMAT}.get(self.cols_mode.currentIndex())
+        suffix = f"_{compact}" if compact else ""
         default = d.bag_dir.parent / f"{d.bag_dir.name}_{lo:.2f}-{hi:.2f}s{suffix}.csv"
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export synced CSV", str(default), "CSV (*.csv)")
         if not path:
             return
-        if tag_imu:
-            self._export_tag_to_imu(path, lo, hi)
+        if compact:
+            self._export_compact(path, lo, hi, compact)
             return
         cols = None
         if self.cols_mode.currentIndex() == 1:
@@ -1857,45 +1869,160 @@ class Viewer(QtWidgets.QMainWindow):
         self.statusBar().showMessage(msg, 12000)
         self._maybe_export_pngs(res, path, msg)
 
-    def _ask_labels(self):
-        """Ask for the action / approx_diam labels of a tag_to_imu_format export. None = cancelled.
-        The previous answers are offered again, so a batch of similar runs is quick to label."""
-        last = getattr(self, "_last_labels", ("", ""))
+    def _label_dialog(self, title, note):
+        """A dialog with a form, OK / Cancel and a 'No labels' button. Returns (dlg, form, no_labels button)."""
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("Labels for this export")
-        form = QtWidgets.QFormLayout(dlg)
-        act = QtWidgets.QComboBox()
-        act.addItems(["(blank)"] + list(ACTIONS))
-        act.setCurrentIndex(act.findText(last[0]) if last[0] in ACTIONS else 0)
-        rad = QtWidgets.QLineEdit(last[1])
-        rad.setPlaceholderText("diameter, metres: e.g. 2.5, 5, 7.5 (straight: -1, set automatically)")
-        form.addRow("action", act)
-        form.addRow("approx_diam (m)", rad)
-        form.addRow(QtWidgets.QLabel("Written to every row of the CSV, as its last two columns.\n"
-                                     "No labels: both columns left blank (the trainer then uses this\n"
-                                     "recording for the measured targets only)."))
+        dlg.setWindowTitle(title)
+        outer = QtWidgets.QVBoxLayout(dlg)
+        form = QtWidgets.QFormLayout()
+        outer.addLayout(form)
+        outer.addWidget(QtWidgets.QLabel(note))
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok
                                         | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
         nolab = bb.addButton("No labels", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole)
-        nolab.clicked.connect(lambda: (act.setCurrentIndex(0), rad.clear(), dlg.accept()))
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
-        form.addRow(bb)
+        outer.addWidget(bb)
+        return dlg, form, nolab
+
+    def _ask_labels(self):
+        """Ask for the two labels of a tag_to_imu_format export: {'action', 'approx_diam'}, or None if
+        cancelled. The previous answers are offered again, so a batch of similar runs is quick to label."""
+        last = getattr(self, "_last_labels", ("", ""))
+        dlg, form, nolab = self._label_dialog(
+            "Labels for this export",
+            "Written to every row of the CSV, as its last two columns.\n"
+            "No labels: both columns left blank (the trainer then uses this\n"
+            "recording for the measured targets only).\n"
+            f"Wall and angle tests are exported with {FLOW_FORMAT} instead.")
+        act = QtWidgets.QComboBox()
+        act.addItems(["(blank)"] + list(ACTIONS))
+        act.setCurrentIndex(act.findText(last[0]) if last[0] in ACTIONS else 0)
+        diam = QtWidgets.QLineEdit(last[1])
+        diam.setPlaceholderText("diameter, metres: e.g. 2.5, 5, 7.5 (straight: -1, set automatically)")
+        form.addRow("action", act)
+        form.addRow("approx_diam (m)", diam)
+        nolab.clicked.connect(lambda: (act.setCurrentIndex(0), diam.clear(), dlg.accept()))
+        dlg.resize(max(dlg.sizeHint().width(), 560), dlg.sizeHint().height())
         while True:
             if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
                 return None
             a = "" if act.currentIndex() == 0 else act.currentText()
             try:
-                labels = check_labels(a, rad.text())
+                action, d = check_labels(a, diam.text())
             except ValueError as e:
                 QtWidgets.QMessageBox.warning(self, "Labels", str(e))
                 continue
-            self._last_labels = (a, rad.text().strip())
+            self._last_labels = (a, "" if a == "straight" else diam.text().strip())
+            return {"action": action or None, "approx_diam": d}
+
+    def _ask_flow_labels(self):
+        """Ask for the test and its two labels of a tag_imu_to_flow_class export: the dict from
+        check_flow_labels, or None if cancelled. Each test's last answers are filled in again (and kept
+        between sessions), so a batch recorded at one distance only needs the side or the angle changed."""
+        store = QtCore.QSettings("bagsync", "bag_viewer")
+        keys = ("test", "wall_side", "dist_to_wall", "angle_to_head", "dist_to_head", "no_attachment")
+        last = {k: str(store.value(f"flow_labels/{k}", "") or "") for k in keys}
+        dlg, form, nolab = self._label_dialog(
+            "Labels for this flow-class export",
+            "Written to every row, in the CSV's last five columns: test, wall_side, dist_to_wall,\n"
+            "angle_to_head, dist_to_head. The two columns of the other test are left blank.\n"
+            "The distances start at what you entered last time for that test.")
+        test = QtWidgets.QComboBox()
+        test.addItems(list(FLOW_TESTS))
+        test.setCurrentIndex(max(0, test.findText(last["test"])))
+        side = QtWidgets.QComboBox()
+        side.addItems(["(blank)"] + list(WALL_SIDES))
+        side.setCurrentIndex(max(0, side.findText(last["wall_side"])))
+        side.setToolTip("Which side of the ROV the wall is on. none = no wall nearby (open-water baseline).")
+        wall_d = QtWidgets.QLineEdit(last["dist_to_wall"])
+        angle = QtWidgets.QLineEdit(last["angle_to_head"])
+        angle.setPlaceholderText("degrees, e.g. 0, 45, 90, -45")
+        head_d = QtWidgets.QLineEdit(last["dist_to_head"])
+        no_att = QtWidgets.QCheckBox(f"Attachment not connected (angle_to_head = {NO_ANGLE})")
+        no_att.setChecked(last["no_attachment"] == "1")
+        no_att.setToolTip("Baseline run without the flow-disturbance attachment: angle_to_head is written as\n"
+                          f"'{NO_ANGLE}' and dist_to_head as {NO_ATTACHMENT:g}. Your angle and distance are kept for the next run.")
+        form.addRow("test", test)
+        pages = QtWidgets.QStackedWidget()          # one page of label fields per test
+        for group in ([("wall_side", side), ("dist_to_wall (m)", wall_d)],
+                      [("", no_att), ("angle_to_head (deg)", angle), ("dist_to_head (m)", head_d)]):
+            page = QtWidgets.QWidget()
+            pf = QtWidgets.QFormLayout(page)
+            pf.setContentsMargins(0, 0, 0, 0)
+            for text, w in group:
+                pf.addRow(text, w)
+            pages.addWidget(page)
+        form.addRow(pages)
+
+        kept = [last["dist_to_wall"]]                # the wall distance while wall_side is none
+        kept_a = [last["angle_to_head"], last["dist_to_head"]]   # angle, distance while the attachment is off
+
+        def refresh(*_):
+            pages.setCurrentIndex(test.currentIndex())
+            no_wall = side.currentText() == "none"
+            if no_wall and wall_d.isEnabled():           # put the distance aside: -1 is written instead
+                kept[0] = wall_d.text()
+                wall_d.clear()
+            elif not no_wall and not wall_d.isEnabled():  # a wall again: bring the distance back
+                wall_d.setText(kept[0])
+            wall_d.setEnabled(not no_wall)
+            wall_d.setPlaceholderText(f"{NO_WALL:g}, set automatically (no wall)" if no_wall
+                                      else "distance to the wall, metres: e.g. 0.3, 1")
+
+            off = no_att.isChecked()                     # the typed angle and distance stay in the boxes' memory
+            if off and angle.isEnabled():
+                kept_a[:] = [angle.text(), head_d.text()]
+                angle.clear()
+                head_d.clear()
+            elif not off and not angle.isEnabled():
+                angle.setText(kept_a[0])
+                head_d.setText(kept_a[1])
+            angle.setEnabled(not off)
+            head_d.setEnabled(not off)
+            angle.setPlaceholderText(f"{NO_ANGLE}, set automatically" if off else "degrees, e.g. 0, 45, 90, -45")
+            head_d.setPlaceholderText(f"{NO_ATTACHMENT:g}, set automatically" if off else "distance, metres: e.g. 0.3, 1")
+
+        no_att.toggled.connect(refresh)
+        test.currentIndexChanged.connect(refresh)
+        side.currentIndexChanged.connect(refresh)
+        refresh()
+        blank = []
+        nolab.clicked.connect(lambda: (blank.append(True), dlg.accept()))
+        dlg.resize(max(dlg.sizeHint().width(), 560), dlg.sizeHint().height())
+        while True:
+            del blank[:]
+            if dlg.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return None
+            if blank:
+                return check_flow_labels(None)
+            t = test.currentText()
+            s_ = "" if side.currentIndex() == 0 else side.currentText()
+            try:
+                if t == "dist_to_wall":
+                    labels = check_flow_labels(t, wall_side=s_, dist_to_wall=wall_d.text())
+                else:
+                    labels = check_flow_labels(t, angle_to_head=NO_ANGLE if no_att.isChecked() else angle.text(),
+                                               dist_to_head=head_d.text())
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Labels", str(e))
+                continue
+            store.setValue("flow_labels/test", t)
+            if t == "dist_to_wall":
+                store.setValue("flow_labels/wall_side", s_)
+                store.setValue("flow_labels/dist_to_wall", (kept[0] if s_ == "none" else wall_d.text()).strip())
+            else:
+                off = no_att.isChecked()
+                store.setValue("flow_labels/no_attachment", "1" if off else "0")
+                store.setValue("flow_labels/angle_to_head", (kept_a[0] if off else angle.text()).strip())
+                store.setValue("flow_labels/dist_to_head", (kept_a[1] if off else head_d.text()).strip())
             return labels
 
-    def _export_tag_to_imu(self, path, lo, hi):
+    def _export_compact(self, path, lo, hi, fmt):
+        """Export tag_to_imu_format or tag_imu_to_flow_class: the same synced columns, different labels."""
         d = self.data
-        labels = self._ask_labels()
+        flow = fmt == FLOW_FORMAT
+        labels = self._ask_flow_labels() if flow else self._ask_labels()
         if labels is None:
             return
         rate = self.rate_spin.value() if self.sync_mode.currentIndex() == 1 else None
@@ -1904,22 +2031,23 @@ class Viewer(QtWidgets.QMainWindow):
             res, notes = tag_to_imu_sync(d, lo, hi, self.gap_spin.value(), rate)
             if res.n_rows == 0:
                 raise RuntimeError("No rows inside that window.")
-            write_tag_to_imu_csv(d, res, path, rate, {"bag": str(d.bag_dir), "camera_topic": d.camera_topic,
-                                                      "gap_factor": self.gap_spin.value(), "notes": notes,
-                                                      "autopilot_timed": self._fcu_reports},
-                                 sidecar=self.json_check.isChecked(), action=labels[0], approx_diam=labels[1])
+            meta = {"bag": str(d.bag_dir), "camera_topic": d.camera_topic, "gap_factor": self.gap_spin.value(),
+                    "notes": notes, "autopilot_timed": self._fcu_reports}
+            if flow:
+                write_flow_class_csv(d, res, path, rate, meta, sidecar=self.json_check.isChecked(), **labels)
+            else:
+                write_tag_to_imu_csv(d, res, path, rate, meta, sidecar=self.json_check.isChecked(), **labels)
         except Exception as e:  # noqa: BLE001
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, "Export failed", str(e))
             return
         QtWidgets.QApplication.restoreOverrideCursor()
-        msg = (f"Wrote {Path(path).name} ({TAG_IMU_FORMAT}): {res.n_rows} rows × {len(res.names) + 4} columns, "
-               f"action={labels[0] or '(blank)'}, approx_diam={labels[1] if labels[1] else '(blank)'}"
-               f"  ·  {'; '.join(notes)}")
+        msg = (f"Wrote {Path(path).name} ({fmt}): {res.n_rows} rows × {len(res.names) + 2 + len(labels)} columns, "
+               f"{labels_text(labels)}  ·  {'; '.join(notes)}")
         print("[bagsync] " + msg)
         self.statusBar().showMessage(msg, 15000)
         if any(n.startswith("no ") for n in notes):
-            QtWidgets.QMessageBox.information(self, TAG_IMU_FORMAT, "\n".join(notes))
+            QtWidgets.QMessageBox.information(self, fmt, "\n".join(notes))
         self._maybe_export_pngs(res, path, msg)
 
     def _maybe_export_pngs(self, res, path, msg):

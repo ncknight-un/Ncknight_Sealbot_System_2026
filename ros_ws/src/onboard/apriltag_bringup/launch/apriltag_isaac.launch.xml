@@ -1,0 +1,21 @@
+<launch>
+  <node_container pkg="rclcpp_components" exec="component_container_mt"
+                  name="apriltag_container" namespace="/" output="screen">
+
+    <!-- Rectify (unchanged, CPU) -->
+    <composable_node pkg="image_proc" plugin="image_proc::RectifyNode" name="rectify">
+      <remap from="image" to="/camera/image_raw" />
+      <remap from="camera_info" to="/camera/camera_info" />
+      <remap from="image_rect" to="/camera/image_rect" />
+    </composable_node>
+
+    <!-- Isaac ROS AprilTag (GPU) -->
+    <composable_node pkg="isaac_ros_apriltag"
+                     plugin="nvidia::isaac_ros::apriltag::AprilTagNode" name="apriltag">
+      <remap from="image" to="/camera/image_rect" />
+      <remap from="camera_info" to="/camera/camera_info" />
+      <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
+    </composable_node>
+
+  </node_container>
+</launch>

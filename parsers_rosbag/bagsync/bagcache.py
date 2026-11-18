@@ -52,7 +52,7 @@ from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_idl, get_types_from_msg, get_typestore
 
 CACHE_VERSION = 9
-VERSION = "bagsync v11"
+VERSION = "bagsync v12"
 CACHE_DIRNAME = ".bagsync_cache"
 HEADER_SANITY_S = 5.0        # max |receive - header| before falling back to receive time
 MAX_ARRAY_ELEMS = 64         # numeric arrays longer than this are skipped (blobs)

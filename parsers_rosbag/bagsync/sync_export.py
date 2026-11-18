@@ -1250,7 +1250,8 @@ def short_name_(name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# tag_to_imu_format: a compact, fixed-order CSV for tag -> IMU work
+# tag_to_imu_format: a compact, fixed-order CSV for tag -> IMU work (turning and straight runs).
+# tag_imu_to_flow_class (further down) uses the same columns with different labels.
 # --------------------------------------------------------------------------- #
 TAG_IMU_FORMAT = "tag_to_imu_format"
 TAG_IMU_ACC_FIELDS = [f"linear_acceleration.{a}" for a in "xyz"]
@@ -1280,7 +1281,8 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
          The export fails if it can't be made (no IMU orientation).
       3. depth: global_position/local pose.pose.position.z (metres, negative underwater)
       4. derived/turn.turn_rate_avg: heading rate (rad/s, + = left) averaged over the last 5 s (past only)
-    (write_tag_to_imu_csv then adds the two label columns, action and approx_diam.)
+    (write_tag_to_imu_csv then adds the two label columns, action and approx_diam;
+    write_flow_class_csv adds the five FLOW_LABEL_COLUMNS instead.)
     Returns ([(series_name, column)], notes).
     """
     notes: list[str] = []
@@ -1312,7 +1314,7 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
     if grav is None:
         grav = gravity_removed_series(data)
         if grav is None:
-            raise RuntimeError("can't export tag_to_imu_format: derived/imu/data/gravity_removed couldn't be made "
+            raise RuntimeError("can't export this format: derived/imu/data/gravity_removed couldn't be made "
                                "(no imu/data topic with orientation, linear_acceleration and angular_velocity)")
         data.series[grav.name] = grav
     cols += [(grav.name, c) for c in TAG_IMU_IMU_FIELDS]
@@ -1331,7 +1333,7 @@ def tag_to_imu_layout(data: BagData) -> tuple[list[tuple[str, str]], list[str]]:
     if turn is None:
         turn = turn_series(data, grav)
         if turn is None:
-            raise RuntimeError("can't export tag_to_imu_format: derived/turn couldn't be made")
+            raise RuntimeError("can't export this format: derived/turn couldn't be made")
         data.series[turn.name] = turn
     cols.append((turn.name, "turn_rate_avg"))
     notes.append(f"turn rate: {turn.short}.turn_rate_avg (rad/s, + = left, average of the last "
@@ -1344,7 +1346,7 @@ def tag_to_imu_sync(data: BagData, start_s=None, stop_s=None, gap_factor: float 
     """Sync just the tag_to_imu_format columns and put them in that order."""
     wanted, notes = tag_to_imu_layout(data)
     if not wanted:
-        raise RuntimeError("Nothing to export in tag_to_imu_format: " + "; ".join(notes))
+        raise RuntimeError("Nothing to export: " + "; ".join(notes))
     res = sync(data, start_s, stop_s, wanted, gap_factor, rate)
     full = [f"{data.series[n].short}.{c}" for n, c in wanted]
     by_name = {n: i for i, n in enumerate(res.names)}
@@ -1389,33 +1391,132 @@ ACTIONS = ("straight", "right", "left")     # allowed values of the action label
 STRAIGHT_DIAM = -1.0                        # approx_diam written for straight runs (no circle)
 
 
+def _blank(v) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip())
+
+
+def _number(v, what: str) -> float:
+    try:
+        r = float(v)
+    except (TypeError, ValueError):
+        r = float("nan")
+    if not np.isfinite(r):
+        raise ValueError(f"{what} must be a number, not {v!r}")
+    return r
+
+
 def check_labels(action: str | None, approx_diam) -> tuple[str, float | None]:
-    """Validate the user's labels for a tag_to_imu_format export. Returns (action or "", diameter or None).
-    A straight run always gets approx_diam = -1 (STRAIGHT_DIAM); a turn needs a positive diameter or blank."""
+    """Validate the user's labels for a tag_to_imu_format export (turning and straight runs).
+    Returns (action or "", approx_diam or None). A straight run always gets -1 (STRAIGHT_DIAM); a turn
+    needs a positive diameter in metres, or blank."""
     action = (action or "").strip().lower()
     if action and action not in ACTIONS:
         raise ValueError(f"action must be one of {', '.join(ACTIONS)} (or empty), not {action!r}")
-    blank = approx_diam is None or (isinstance(approx_diam, str) and not approx_diam.strip())
     if action == "straight":
-        if not blank and float(approx_diam) != STRAIGHT_DIAM:
+        if not _blank(approx_diam) and _number(approx_diam, "approx_diam") != STRAIGHT_DIAM:
             raise ValueError(f"straight runs get approx_diam = {STRAIGHT_DIAM:g} automatically; leave it blank")
         return action, STRAIGHT_DIAM
-    if blank:
+    if _blank(approx_diam):
         return action, None
-    r = float(approx_diam)
-    if not np.isfinite(r) or r <= 0:
+    r = _number(approx_diam, "approx_diam")
+    if r <= 0:
         raise ValueError(f"approx_diam must be a positive number of metres, not {approx_diam!r}")
     return action, r
 
 
-def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
-                         meta: dict | None = None, sidecar: bool = False,
-                         action: str | None = None, approx_diam: float | None = None) -> Path:
-    """tag_to_imu_format CSV: t_s, dt_s, then the tag tf columns, the IMU columns, the depth column,
-    then the two label columns the user typed in for this export: action (straight / right / left)
-    and approx_diam (approximate circle diameter, m; -1 for straight). Both are the same on every row;
-    blank if not given."""
-    action, approx_diam = check_labels(action, approx_diam)
+# --------------------------------------------------------------------------- #
+# tag_imu_to_flow_class: the same sensor columns, labelled for the two flow tests
+# --------------------------------------------------------------------------- #
+FLOW_FORMAT = "tag_imu_to_flow_class"
+FLOW_TESTS = ("dist_to_wall", "angle_to_head")      # which test a recording belongs to
+WALL_SIDES = ("right", "none", "left")              # classes of the wall-side classifier
+NO_WALL = -1.0                                      # dist_to_wall written when wall_side is none
+NO_ANGLE = "none"                                   # angle_to_head when the flow-disturbance attachment is not connected
+NO_ATTACHMENT = -1.0                                # dist_to_head written when angle_to_head is none
+ANGLE_LIMIT_DEG = 360.0                             # |angle_to_head| above this is taken as a typo
+# The label columns, in CSV order (after the sensor columns). Every export has all five, so files from
+# both tests share one header; the two that belong to the other test are left blank.
+#   test            dist_to_wall | angle_to_head
+#   wall_side       dist_to_wall test: which side the wall is on (right / none / left)
+#   dist_to_wall    dist_to_wall test: distance to the wall, metres; -1 (NO_WALL) when wall_side is none
+#   angle_to_head   angle_to_head test: the angle, degrees, or none (NO_ANGLE) = attachment not connected
+#   dist_to_head    angle_to_head test: the distance, metres; -1 (NO_ATTACHMENT) when angle_to_head is none
+# Rename a column by editing its name here (and in FLOW_TESTS, if it is a test's name).
+FLOW_LABEL_COLUMNS = ("test", "wall_side", "dist_to_wall", "angle_to_head", "dist_to_head")
+
+
+def check_flow_labels(test: str | None, wall_side: str | None = None, dist_to_wall=None,
+                      angle_to_head=None, dist_to_head=None) -> dict:
+    """Validate the labels of a tag_imu_to_flow_class export. Returns {column: value} for
+    FLOW_LABEL_COLUMNS: text for test and wall_side, a float for the others, None = blank.
+      dist_to_wall test    wall_side right / none / left, and dist_to_wall >= 0 m. wall_side none always
+                           gets dist_to_wall = -1 (NO_WALL); -1 on its own means wall_side none.
+      angle_to_head test   angle_to_head in degrees, and dist_to_head >= 0 m. angle_to_head "none" = the
+                           flow-disturbance attachment is not connected (baseline); dist_to_head is then
+                           always -1 (NO_ATTACHMENT).
+    Any label may be left blank. Labels of the other test are refused, so a recording can't end up
+    labelled for both. test = None with nothing else given: every label blank."""
+    test = (test or "").strip().lower()
+    wall_side = (wall_side or "").strip().lower()
+    out: dict = dict.fromkeys(FLOW_LABEL_COLUMNS)
+    wall_given = bool(wall_side) or not _blank(dist_to_wall)
+    angle_given = not _blank(angle_to_head) or not _blank(dist_to_head)
+    if not test:
+        if wall_given or angle_given:
+            raise ValueError(f"say which test these labels belong to: {' or '.join(FLOW_TESTS)}")
+        return out
+    if test not in FLOW_TESTS:
+        raise ValueError(f"test must be one of {', '.join(FLOW_TESTS)}, not {test!r}")
+    out["test"] = test
+    if test == "dist_to_wall":
+        if angle_given:
+            raise ValueError("angle_to_head and dist_to_head belong to the angle_to_head test, not dist_to_wall")
+        if wall_side and wall_side not in WALL_SIDES:
+            raise ValueError(f"wall_side must be one of {', '.join(WALL_SIDES)} (or empty), not {wall_side!r}")
+        d = None if _blank(dist_to_wall) else _number(dist_to_wall, "dist_to_wall")
+        if wall_side == "none" or (not wall_side and d == NO_WALL):
+            if d is not None and d != NO_WALL:
+                raise ValueError(f"wall_side none gets dist_to_wall = {NO_WALL:g} automatically; leave it blank")
+            wall_side, d = "none", NO_WALL
+        elif d is not None:
+            if d < 0:
+                raise ValueError(f"dist_to_wall must be 0 metres or more, not {dist_to_wall!r} "
+                                 "(for a run with no wall, set wall_side to none)")
+            if not wall_side:
+                raise ValueError("dist_to_wall needs a wall_side: right or left")
+        out["wall_side"], out["dist_to_wall"] = wall_side or None, d
+        return out
+    if wall_given:
+        raise ValueError("wall_side and dist_to_wall belong to the dist_to_wall test, not angle_to_head")
+    if isinstance(angle_to_head, str) and angle_to_head.strip().lower() == NO_ANGLE:
+        if not _blank(dist_to_head) and _number(dist_to_head, "dist_to_head") != NO_ATTACHMENT:
+            raise ValueError(f"angle_to_head none gets dist_to_head = {NO_ATTACHMENT:g} automatically; leave it blank")
+        out["angle_to_head"], out["dist_to_head"] = NO_ANGLE, NO_ATTACHMENT
+        return out
+    if not _blank(angle_to_head):
+        ang = _number(angle_to_head, "angle_to_head")
+        if abs(ang) > ANGLE_LIMIT_DEG:
+            raise ValueError(f"angle_to_head is in degrees, within ±{ANGLE_LIMIT_DEG:g}, not {angle_to_head!r}")
+        out["angle_to_head"] = ang
+    if not _blank(dist_to_head):
+        d = _number(dist_to_head, "dist_to_head")
+        if d < 0:
+            raise ValueError(f"dist_to_head must be 0 metres or more, not {dist_to_head!r} "
+                             "(with the attachment not connected, set angle_to_head to none)")
+        out["dist_to_head"] = d
+    return out
+
+
+def labels_text(labels: dict) -> str:
+    """'test=dist_to_wall, wall_side=left, dist_to_wall=0.3' (blank labels left out)."""
+    parts = [f"{k}={v if isinstance(v, str) else format(v, 'g')}" for k, v in labels.items() if v is not None]
+    return ", ".join(parts) if parts else "no labels"
+
+
+def _write_compact_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None, meta: dict | None,
+                       sidecar: bool, fmt: str, labels: dict) -> Path:
+    """t_s (the export's Start = 0), dt_s, the synced columns of res, then one column per label, the same
+    on every row (None = blank)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     dt = frame_dt(data, res, rate)
@@ -1423,13 +1524,14 @@ def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate:
     cols = [[f"{x:.6f}" for x in t_rel],
             ["" if x != x else f"{x:.9f}" for x in dt.tolist()]]
     cols += [_fmt_col(v, k) for v, k in zip(res.values, res.kinds)]
-    cols += [[action] * res.n_rows, ["" if approx_diam is None else f"{approx_diam:g}"] * res.n_rows]
+    for v in labels.values():
+        cols.append(["" if v is None else v if isinstance(v, str) else f"{v:g}"] * res.n_rows)
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["t_s", "dt_s"] + res.names + ["action", "approx_diam"])
+        w.writerow(["t_s", "dt_s"] + res.names + list(labels))
         w.writerows(zip(*cols))
     if sidecar:
-        side = {"csv": path.name, "format": TAG_IMU_FORMAT, "rows": res.n_rows,
+        side = {"csv": path.name, "format": fmt, "rows": res.n_rows,
                 "first_timestamp": _fmt_ns(int(res.t[0])) if res.n_rows else None,
                 "window_t_s": [float((res.t[0] - res.t0) / 1e9), float((res.t[-1] - res.t0) / 1e9)]
                 if res.n_rows else None,
@@ -1439,11 +1541,35 @@ def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate:
                 "t_s_zero_in_bag_s": float((res.t[0] - res.t0) / 1e9) if res.n_rows else None,
                 "dt_s": "seconds since the previous camera frame in the bag (blank for the bag's first frame)",
                 "columns": {n: m for n, m in zip(res.names, res.modes)}, "series": res.notes,
-                "labels": {"action": action or None, "approx_diam_m": approx_diam}}
+                "labels": labels}
         if meta:
             side.update(meta)
         path.with_suffix(".sync.json").write_text(json.dumps(side, indent=1))
     return path
+
+
+def write_tag_to_imu_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
+                         meta: dict | None = None, sidecar: bool = False,
+                         action: str | None = None, approx_diam: float | None = None) -> Path:
+    """tag_to_imu_format CSV, for turning and straight runs: t_s, dt_s, then the tag tf columns, the IMU
+    columns, the depth column and the turn rate, then the two label columns the user typed in for this
+    export: action (straight / right / left) and approx_diam (approximate circle diameter, m; -1 for
+    straight). Both are the same on every row; blank if not given."""
+    action, approx_diam = check_labels(action, approx_diam)
+    return _write_compact_csv(data, res, path, rate, meta, sidecar, TAG_IMU_FORMAT,
+                              {"action": action or None, "approx_diam": approx_diam})
+
+
+def write_flow_class_csv(data: BagData, res: SyncResult, path: str | Path, rate: float | None = None,
+                         meta: dict | None = None, sidecar: bool = False, test: str | None = None,
+                         wall_side: str | None = None, dist_to_wall=None,
+                         angle_to_head=None, dist_to_head=None) -> Path:
+    """tag_imu_to_flow_class CSV, for the dist_to_wall and angle_to_head tests: the same t_s, dt_s and
+    sensor columns as tag_to_imu_format (res comes from tag_to_imu_sync), then the five
+    FLOW_LABEL_COLUMNS: test, wall_side, dist_to_wall, angle_to_head, dist_to_head. The same on every
+    row; the columns of the other test, and any label not given, are blank."""
+    labels = check_flow_labels(test, wall_side, dist_to_wall, angle_to_head, dist_to_head)
+    return _write_compact_csv(data, res, path, rate, meta, sidecar, FLOW_FORMAT, labels)
 
 
 def export_images(data: BagData, res: SyncResult, out_dir: str | Path, progress=None) -> int:
@@ -1651,19 +1777,36 @@ def main(argv=None):
     ap.add_argument("--tag-px", dest="tag_px", nargs="*", metavar="TF",
                     help="add unfiltered pixel-centre x/y (translation.x_px / y_px, full bandwidth) to tf "
                          "series containing these words (e.g. tag_18). No smoothing is applied.")
-    ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT), default="standard",
-                    help=f"'{TAG_IMU_FORMAT}': time since the export's start (0 = --start), dt between camera "
-                         "frames, then each tag's deviation from its zero frame (translation + quaternion) and a "
-                         "seen flag, the IMU with gravity removed (derived/imu/data/gravity_removed: "
-                         "linear_acceleration, angular_velocity), and the "
-                         "depth topic last. No orientation. Ignores --topics and --integrate-imu.")
+    ap.add_argument("--format", choices=("standard", TAG_IMU_FORMAT, FLOW_FORMAT), default="standard",
+                    help=f"'{TAG_IMU_FORMAT}' (turning and straight runs): time since the export's start "
+                         "(0 = --start), dt between camera frames, then each tag's deviation from its zero "
+                         "frame (translation + quaternion) and a seen flag, the IMU with gravity removed "
+                         "(derived/imu/data/gravity_removed: linear_acceleration, angular_velocity), depth and "
+                         "the averaged turn rate, then the labels --action and --approx-diam. "
+                         f"'{FLOW_FORMAT}' (dist_to_wall and angle_to_head tests): the same columns, then the "
+                         f"labels {', '.join(FLOW_LABEL_COLUMNS)}. No orientation. Both ignore --topics and "
+                         "--integrate-imu.")
     ap.add_argument("--action", choices=ACTIONS,
                     help=f"{TAG_IMU_FORMAT} only: label written to every row's 'action' column "
                          "(what the ROV is doing in this window). Blank if not given.")
     ap.add_argument("--approx-diam", type=float, metavar="M",
                     help=f"{TAG_IMU_FORMAT} only: approximate circle diameter in metres (e.g. 2.5, 5, 7.5), "
-                         "written to every row's 'approx_diam' column. --action straight writes -1 automatically. "
-                         "Blank if not given.")
+                         "written to every row's 'approx_diam' column. --action straight writes -1 "
+                         "automatically. Blank if not given.")
+    ap.add_argument("--flow-test", choices=FLOW_TESTS,
+                    help=f"{FLOW_FORMAT} only: which test this recording is. Worked out from the labels "
+                         "below when you give any, so only needed for an export without labels.")
+    ap.add_argument("--wall-side", choices=WALL_SIDES,
+                    help=f"{FLOW_FORMAT}, dist_to_wall test: the side the wall is on. 'none' = no wall nearby "
+                         f"(open-water baseline); dist_to_wall is then written as {NO_WALL:g} automatically.")
+    ap.add_argument("--dist-to-wall", type=float, metavar="M",
+                    help=f"{FLOW_FORMAT}, dist_to_wall test: distance to the wall in metres.")
+    ap.add_argument("--angle-to-head", metavar="DEG",
+                    help=f"{FLOW_FORMAT}, angle_to_head test: the angle in degrees, or 'none' = the flow-disturbance "
+                         f"attachment is not connected (baseline); dist_to_head is then written as "
+                         f"{NO_ATTACHMENT:g} automatically.")
+    ap.add_argument("--dist-to-head", type=float, metavar="M",
+                    help=f"{FLOW_FORMAT}, angle_to_head test: the distance in metres.")
     ap.add_argument("--fcu-time", action="store_true",
                     help="give MAVROS topics the autopilot's own sample times, decoded from the recorded raw "
                          "MAVLink stream (.../mavlink_source). Topics it can't do are left as recorded.")
@@ -1739,22 +1882,43 @@ def main(argv=None):
             data.series[s_int.name] = s_int
             print(imu_summary(s_int.info))
 
-    if a.format == TAG_IMU_FORMAT:
+    if a.format in (TAG_IMU_FORMAT, FLOW_FORMAT):
+        wall = {"wall_side": a.wall_side, "dist_to_wall": a.dist_to_wall}
+        angle = {"angle_to_head": a.angle_to_head, "dist_to_head": a.dist_to_head}
+        turn_given = [f"--{k}" for k, v in (("action", a.action), ("approx-diam", a.approx_diam)) if v is not None]
+        flow_given = [f"--{k.replace('_', '-')}" for k, v in {"flow_test": a.flow_test, **wall, **angle}.items()
+                      if v is not None]
         try:
-            a.action, a.approx_diam = check_labels(a.action, a.approx_diam)
+            if a.format == TAG_IMU_FORMAT:
+                if flow_given:
+                    raise ValueError(f"{', '.join(flow_given)}: wall and angle labels now go in "
+                                     f"--format {FLOW_FORMAT}; {TAG_IMU_FORMAT} takes --action and --approx-diam")
+                action, diam = check_labels(a.action, a.approx_diam)
+                labels = {"action": action or None, "approx_diam": diam}
+            else:
+                if turn_given:
+                    raise ValueError(f"{', '.join(turn_given)}: turn labels go in --format {TAG_IMU_FORMAT}; "
+                                     f"{FLOW_FORMAT} takes --wall-side / --dist-to-wall or "
+                                     "--angle-to-head / --dist-to-head")
+                test = a.flow_test
+                if test is None and any(v is not None for v in wall.values()):
+                    test = "dist_to_wall"
+                if test is None and any(v is not None for v in angle.values()):
+                    test = "angle_to_head"
+                labels = check_flow_labels(test, **wall, **angle)
         except ValueError as e:
             ap.error(str(e))
         res, notes = tag_to_imu_sync(data, a.start, a.stop, a.gap_factor, a.rate)
         if res.n_rows == 0:
             print("No camera frames inside that window.")
             return 1
-        out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_{TAG_IMU_FORMAT}.csv"
-        write_tag_to_imu_csv(data, res, out, a.rate, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
-                                                      "gap_factor": a.gap_factor, "notes": notes,
-                                                      "autopilot_timed": fcu_reports},
-                             sidecar=a.sidecar, action=a.action, approx_diam=a.approx_diam)
-        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 4} columns, {TAG_IMU_FORMAT}, "
-              f"action={a.action or '(blank)'}, approx_diam={a.approx_diam if a.approx_diam else '(blank)'})")
+        out = Path(a.out) if a.out else data.bag_dir.parent / f"{data.bag_dir.name}_{a.format}.csv"
+        _write_compact_csv(data, res, out, a.rate, {"bag": str(data.bag_dir), "camera_topic": data.camera_topic,
+                                                    "gap_factor": a.gap_factor, "notes": notes,
+                                                    "autopilot_timed": fcu_reports},
+                           a.sidecar, a.format, labels)
+        print(f"Wrote {out}  ({res.n_rows} rows x {len(res.names) + 2 + len(labels)} columns, {a.format}, "
+              f"{labels_text(labels)})")
         for n in notes:
             print("  " + n)
         if a.export_images:

@@ -32,7 +32,7 @@ Pass the bag **folder** (the one holding `metadata.yaml` and `surfaceLine1_tagge
    - drag the blue band or its edges,
    - type start/stop times,
    - move the yellow cursor to a frame and press `[` (start) or `]` (stop).
-3. Choose whether to export **all fields**, **ticked fields only**, or **tag_to_imu_format** (see below).
+3. Choose whether to export **all fields**, **ticked fields only**, **tag_to_imu_format** (turning and straight runs) or **tag_imu_to_flow_class** (wall and angle tests); see below for the last two.
 4. Click **Export CSV**. Optionally also save that window's full-resolution frames as PNG files.
 
 **Keys:**
@@ -247,7 +247,7 @@ Covariance arrays are left out. Add `--include-covariance` to include them.
 
 ### tag_to_imu_format
 
-The third choice in the export dropdown (or `--format tag_to_imu_format` on the command line) writes a compact CSV with a fixed column order, one row per camera frame in the window:
+For **turning and straight runs**. The third choice in the export dropdown (or `--format tag_to_imu_format` on the command line) writes a compact CSV with a fixed column order, one row per camera frame in the window. Wall and angle tests use `tag_imu_to_flow_class` (next section), which has the same columns up to the labels.
 
 | Columns | Meaning |
 |---|---|
@@ -270,6 +270,37 @@ The IMU columns are interpolated to each frame's time. There are no orientation 
 python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format -o run1_tag_imu.csv
 python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_to_imu_format --action right --approx-diam 5 -o run1_right.csv
 ```
+
+### tag_imu_to_flow_class
+
+For the **dist_to_wall** and **angle_to_head** tests. The fourth choice in the export dropdown (or `--format tag_imu_to_flow_class`). The sensor columns are exactly those of `tag_to_imu_format`, in the same order: `t_s`, `dt_s`, each tag's deviation and `seen` flag, the gravity-removed IMU, depth, and `derived/turn.turn_rate_avg`. Only the labels differ. Every file ends with the same five label columns, whichever test it is, so files from both tests share one header:
+
+| Column | Test | Meaning |
+|---|---|---|
+| `test` | both | `dist_to_wall` or `angle_to_head`: which test this recording is |
+| `wall_side` | dist_to_wall | Which side the wall is on: `right`, `none` or `left`. `none` = no wall nearby (open-water baseline) |
+| `dist_to_wall` | dist_to_wall | Distance to the wall, metres (≥ 0). **Written as -1 automatically when `wall_side` is `none`** |
+| `angle_to_head` | angle_to_head | The angle, degrees (within ±360; use one sign convention for every recording), or `none` = the flow-disturbance attachment is not connected (baseline run) |
+| `dist_to_head` | angle_to_head | The distance, metres (≥ 0). **Written as -1 automatically when `angle_to_head` is `none`** |
+
+The two columns that belong to the other test are blank, and so is any label you don't give. Each column is one classifier's target: `wall_side` and `dist_to_wall` for the wall test, `angle_to_head` and `dist_to_head` for the angle test. The distances are written as plain numbers, so the trainer can treat each distinct value as a class.
+
+In the viewer a dialog asks which test it is and for that test's two labels. Each test's last answers are filled in again, also after restarting the viewer, so a batch recorded at one distance only needs the side or the angle changed. With `wall_side` = `none` the distance box is greyed out (-1 is written) and your distance comes back when you next pick a side. The angle test has the same thing as a tick box, **Attachment not connected**: it writes `angle_to_head` = `none` and `dist_to_head` = -1, and your angle and distance come back when you untick it. **No labels** leaves all five columns blank. As with `tag_to_imu_format`, the labels apply to every row, so set Start/Stop around the test itself.
+
+On the command line the test is worked out from the labels you give:
+
+```bash
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_imu_to_flow_class --wall-side left --dist-to-wall 0.3 -o wall_left.csv
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_imu_to_flow_class --wall-side none -o wall_none.csv
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_imu_to_flow_class --angle-to-head 45 --dist-to-head 0.3 -o angle_45.csv
+python sync_export.py BAG --start 4.2 --stop 21.75 --format tag_imu_to_flow_class --angle-to-head none -o angle_none.csv
+```
+
+Mixing labels is refused: wall labels with angle labels, `--action` / `--approx-diam` with this format, or wall and angle labels with `tag_to_imu_format`. `--flow-test dist_to_wall` (or `angle_to_head`) sets the `test` column for an export without labels.
+
+The column names and classes are constants near `FLOW_FORMAT` in `sync_export.py` (`FLOW_LABEL_COLUMNS`, `FLOW_TESTS`, `WALL_SIDES`, `NO_WALL`, `NO_ANGLE`, `NO_ATTACHMENT`).
+
+**Older wall exports.** `tag_to_imu_format` used to take `dist_to_wall` as its last column. It no longer does; re-export those windows with `tag_imu_to_flow_class`.
 
 ### Autopilot timing (exact sample times from the MAVLink stream)
 
@@ -321,7 +352,7 @@ On a simulated bag with bursty delivery, stalls and lost messages (autopilot clo
 | `clock_check.py` | Checks whether the camera and IMU are stamped on the same clock (helper script) |
 | `imu_timing.py` | Shows how evenly the IMU is stamped: rate, spacing, bursts (helper script) |
 | `fcutime.py` | Autopilot timing: re-stamps MAVROS topics with the autopilot's sample times from the recorded MAVLink stream |
-| `lag_check.py` | Estimates the tag-to-IMU timing offset from a `tag_to_imu_format` CSV (helper script) |
+| `lag_check.py` | Estimates the tag-to-IMU timing offset from a `tag_to_imu_format` or `tag_imu_to_flow_class` CSV (helper script) |
 
 ## Timing helper scripts
 
@@ -343,4 +374,4 @@ python lag_check.py run.csv    # timing offset between tags and IMU, separated f
 python sync_export.py BAG --fcu-time --gap-factor 10 --format tag_to_imu_format -o run.csv
 ```
 
-Check that the output says `mavros/imu/data` and `mavros/global_position/local` got "autopilot sample times". Export every bag the same way. A small fixed offset of a frame or two can remain; a model that sees a few frames of context learns it, as long as live data has the same timing.
+Use `--format tag_imu_to_flow_class` with its labels for wall and angle tests; everything else stays the same. Check that the output says `mavros/imu/data` and `mavros/global_position/local` got "autopilot sample times". Export every bag the same way. A small fixed offset of a frame or two can remain; a model that sees a few frames of context learns it, as long as live data has the same timing.

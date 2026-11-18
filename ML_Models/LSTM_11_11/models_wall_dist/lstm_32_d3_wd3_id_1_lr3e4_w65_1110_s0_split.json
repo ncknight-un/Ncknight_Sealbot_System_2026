@@ -1,0 +1,56 @@
+{
+ "data_dir": "/home/nolan-knight/Sealbot2.0/ML_Models/LSTM_11_11/data_11_10",
+ "seed": 0,
+ "val_frac": 0.15,
+ "test_frac": 0.15,
+ "splits": {
+  "train": [
+   "sub10_p3LWall_11_10_2026_Tagged_5.05-20.71s_tag_to_imu_format.csv",
+   "sub10_p3RWall_11_10_2026_Tagged_3.85-17.76s_tag_to_imu_format.csv",
+   "sub1_p3RWall_11_10_2026_Tagged_5.60-20.54s_tag_to_imu_format.csv",
+   "sub2_p3LWall_11_10_2026_Tagged_1.80-13.96s_tag_to_imu_format.csv",
+   "sub2_p3RWall_11_10_2026_Tagged_5.42-17.96s_tag_to_imu_format.csv",
+   "sub3_p3LWall_11_10_2026_Tagged_3.15-18.09s_tag_to_imu_format.csv",
+   "sub3_p3RWall_11_10_2026_Tagged_2.92-18.69s_tag_to_imu_format.csv",
+   "sub4_p3LWall_11_10_2026_Tagged_4.96-18.57s_tag_to_imu_format.csv",
+   "sub5_p3LWall_11_10_2026_Tagged_2.02-17.07s_tag_to_imu_format.csv",
+   "sub6_p3LWall_11_10_2026_Tagged_4.84-18.61s_tag_to_imu_format.csv",
+   "sub6_p3RWall_11_10_2026_Tagged_3.04-15.10s_tag_to_imu_format.csv",
+   "sub7_p3LWall_11_10_2026_Tagged_1.92-16.81s_tag_to_imu_format.csv",
+   "sub7_p3RWall_11_10_2026_Tagged_3.44-17.00s_tag_to_imu_format.csv",
+   "sub9_p3RWall_11_10_2026_Tagged_5.79-18.13s_tag_to_imu_format.csv"
+  ],
+  "val": [
+   "sub1_p3LWall_11_10_2026_Tagged_2.34-16.30s_tag_to_imu_format.csv",
+   "sub4_p3RWall_11_10_2026_Tagged_2.31-20.96s_tag_to_imu_format.csv",
+   "sub8_p3RWall_11_10_2026_Tagged_3.08-16.90s_tag_to_imu_format.csv"
+  ],
+  "test": [
+   "sub5_p3RWall_11_10_2026_Tagged_2.43-17.61s_tag_to_imu_format.csv",
+   "sub8_p3LWall_11_10_2026_Tagged_4.17-18.84s_tag_to_imu_format.csv",
+   "sub9_p3LWall_11_10_2026_Tagged_5.01-19.01s_tag_to_imu_format.csv"
+  ]
+ },
+ "strata": {
+  "sub10_p3LWall_11_10_2026_Tagged_5.05-20.71s_tag_to_imu_format.csv": "left (wall test)",
+  "sub10_p3RWall_11_10_2026_Tagged_3.85-17.76s_tag_to_imu_format.csv": "right (wall test)",
+  "sub1_p3LWall_11_10_2026_Tagged_2.34-16.30s_tag_to_imu_format.csv": "left (wall test)",
+  "sub1_p3RWall_11_10_2026_Tagged_5.60-20.54s_tag_to_imu_format.csv": "right (wall test)",
+  "sub2_p3LWall_11_10_2026_Tagged_1.80-13.96s_tag_to_imu_format.csv": "left (wall test)",
+  "sub2_p3RWall_11_10_2026_Tagged_5.42-17.96s_tag_to_imu_format.csv": "right (wall test)",
+  "sub3_p3LWall_11_10_2026_Tagged_3.15-18.09s_tag_to_imu_format.csv": "left (wall test)",
+  "sub3_p3RWall_11_10_2026_Tagged_2.92-18.69s_tag_to_imu_format.csv": "right (wall test)",
+  "sub4_p3LWall_11_10_2026_Tagged_4.96-18.57s_tag_to_imu_format.csv": "left (wall test)",
+  "sub4_p3RWall_11_10_2026_Tagged_2.31-20.96s_tag_to_imu_format.csv": "right (wall test)",
+  "sub5_p3LWall_11_10_2026_Tagged_2.02-17.07s_tag_to_imu_format.csv": "left (wall test)",
+  "sub5_p3RWall_11_10_2026_Tagged_2.43-17.61s_tag_to_imu_format.csv": "right (wall test)",
+  "sub6_p3LWall_11_10_2026_Tagged_4.84-18.61s_tag_to_imu_format.csv": "left (wall test)",
+  "sub6_p3RWall_11_10_2026_Tagged_3.04-15.10s_tag_to_imu_format.csv": "right (wall test)",
+  "sub7_p3LWall_11_10_2026_Tagged_1.92-16.81s_tag_to_imu_format.csv": "left (wall test)",
+  "sub7_p3RWall_11_10_2026_Tagged_3.44-17.00s_tag_to_imu_format.csv": "right (wall test)",
+  "sub8_p3LWall_11_10_2026_Tagged_4.17-18.84s_tag_to_imu_format.csv": "left (wall test)",
+  "sub8_p3RWall_11_10_2026_Tagged_3.08-16.90s_tag_to_imu_format.csv": "right (wall test)",
+  "sub9_p3LWall_11_10_2026_Tagged_5.01-19.01s_tag_to_imu_format.csv": "left (wall test)",
+  "sub9_p3RWall_11_10_2026_Tagged_5.79-18.13s_tag_to_imu_format.csv": "right (wall test)"
+ }
+}

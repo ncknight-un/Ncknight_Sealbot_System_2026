@@ -1,7 +1,7 @@
 <launch>
   <arg name="use_camera" default="true"/>
   <arg name="use_sonar" default="false"/>
-  <arg name="use_apriltag" default="false"/>
+  <arg name="use_apriltag" default="true"/>
   <arg name="use_tag_zero_frames" default="true"/>
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14551@"/>
@@ -18,7 +18,7 @@
   </include>
 
   <!-- Perception (rectify + AprilTag); needs use_camera -->
-  <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml" if="$(var use_apriltag)"/>
+  <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag_isaac.launch.xml" if="$(var use_apriltag)"/>
 
   <!-- Panel zero frames (camera_optical_frame -> tag_N_zero) from config/panel_zero.yaml;
        run panel_calibration and rebuild first -->
