@@ -1,0 +1,44 @@
+# apriltag_bringup
+
+Two interchangeable AprilTag pipelines. Both publish the same outputs, so
+`panel_calibration`, `tag_zero_frames` and `sealbot_viz` work with either:
+
+| output | contents |
+|---|---|
+| `/tf` | `camera_optical_frame -> tag_N` |
+| `/detections` | `apriltag_msgs/AprilTagDetectionArray` |
+
+| detector | launch file | notes |
+|---|---|---|
+| `isaac` (default) | `cam_isaac_tag.launch.xml` | camera + rectify + GPU AprilTag in one container; `isaac_tag_bridge` converts Isaac's `/isaac/tag_detections` into the outputs above |
+| `cpu` | `apriltag.launch.xml` | `apriltag_ros`, configured by `config/tags.yaml` |
+
+Pick it with `detector:=isaac|cpu` on `data_collection/panel_calibration.launch.xml`
+and `data_collection/data_collection.launch.xml`. **Use the same detector for
+both**: the zero poses are only valid for the detector that recorded them, and
+`tag_zero_frames` warns at startup if they differ.
+
+```bash
+ros2 launch data_collection panel_calibration.launch.xml            # Isaac (GPU)
+ros2 launch data_collection panel_calibration.launch.xml detector:=cpu   # fallback
+colcon build --packages-select data_collection                       # install the new zero file
+ros2 launch data_collection data_collection.launch.xml [detector:=cpu]
+```
+
+## Checking Isaac's tag axes against apriltag_ros (one-off)
+
+`tag_N_zero -> tag_N` is expressed in the tag's own frame, so its axes only
+mean the same thing as with the CPU method if both detectors define the tag
+frame the same way. To check, with the panel **not moving**:
+
+```bash
+ros2 launch data_collection panel_calibration.launch.xml detector:=cpu   output_file:=/tmp/zero_cpu.yaml
+ros2 launch data_collection panel_calibration.launch.xml detector:=isaac output_file:=/tmp/zero_isaac.yaml
+ros2 run apriltag_bringup compare_calibrations.py /tmp/zero_cpu.yaml /tmp/zero_isaac.yaml
+```
+
+If it reports a consistent fixed rotation, copy the suggested quaternion into
+`tag_rotation_correction` in `config/isaac_tags.yaml`, rebuild, and re-run the
+Isaac calibration.
+
+Keep `size` equal in `config/tags.yaml` and `config/isaac_tags.yaml`.

@@ -1,6 +1,7 @@
 // Record the zero (rest) pose of every AprilTag on the panel.
 //
-// Listens to the camera -> tag transforms that apriltag_ros broadcasts on /tf,
+// Listens to the camera -> tag transforms on /tf (published by apriltag_ros, or by
+// apriltag_bringup/isaac_tag_bridge for the Isaac ROS detector),
 // collects them for `duration` seconds (starting at the first detection), averages
 // each tag's pose and writes a YAML config. The config holds, per tag, the averaged
 // camera -> tag_N transform, i.e. the pose of the tag's zero frame `tag_N_zero` in
@@ -88,6 +89,7 @@ public:
     startup_timeout_ = as_double(declare_parameter("startup_timeout", rclcpp::ParameterValue(30.0), number));  // s to wait for first tag
     min_samples_     = declare_parameter<int>("min_samples", 10);
     output_file_     = declare_parameter<std::string>("output_file", "");
+    detector_        = declare_parameter<std::string>("detector", "unknown");  // recorded in the file
     if (output_file_.empty()) {
       output_file_ = std::string(DATA_COLLECTION_SOURCE_DIR) + "/config/panel_zero.yaml";
     }
@@ -100,9 +102,9 @@ public:
                                std::bind(&PanelCalibration::check_done, this));
 
     RCLCPP_INFO(get_logger(),
-      "Waiting for '%s*' transforms from '%s'. Keep the panel at rest; "
+      "[%s detector] Waiting for '%s*' transforms from '%s'. Keep the panel at rest; "
       "recording %.1f s once tags are seen.",
-      tag_prefix_.c_str(), camera_frame_.c_str(), duration_);
+      detector_.c_str(), tag_prefix_.c_str(), camera_frame_.c_str(), duration_);
   }
 
   bool succeeded() const { return succeeded_; }
@@ -249,6 +251,7 @@ private:
         << "  ros__parameters:\n"
         << "    camera_frame: " << camera_frame_ << "\n"
         << "    calibrated_at: '" << stamp << "'\n"
+        << "    detector: " << detector_ << "\n"
         << "    duration: " << std::fixed << std::setprecision(1) << duration_ << "\n"
         << "    tag_frames: [" << frame_list.str() << "]\n"
         << "    tags:\n"
@@ -267,7 +270,7 @@ private:
     rclcpp::shutdown();
   }
 
-  std::string camera_frame_, tag_prefix_, output_file_;
+  std::string camera_frame_, tag_prefix_, output_file_, detector_;
   double duration_, startup_timeout_;
   int min_samples_;
 

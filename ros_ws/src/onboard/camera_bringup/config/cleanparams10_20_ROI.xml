@@ -20,7 +20,7 @@
             <Feature Name="StreamSelector" Value="0" Type="Int" />
         </LocalDevice>
         <RemoteDevice>
-            <Feature Name="AcquisitionFrameRate" Value="80.0" Type="Float" />
+            <Feature Name="AcquisitionFrameRate" Value="65.00004" Type="Float" />
             <Feature Name="AcquisitionFrameRateEnable" Value="1" Type="Bool" />
             <Feature Name="AcquisitionFrameRateMode" Value="Basic" Type="Enum" />
             <Feature Name="AcquisitionMode" Value="Continuous" Type="Enum" />

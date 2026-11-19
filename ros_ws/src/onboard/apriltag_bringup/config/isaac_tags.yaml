@@ -1,5 +1,11 @@
+# Shared by the Isaac ROS AprilTag node (GPU) and isaac_tag_bridge; each node
+# ignores the other's parameters. Keep `size` equal to config/tags.yaml (CPU).
 /**:
   ros__parameters:
+    # Isaac AprilTagNode
     size: 0.0085
     max_tags: 24
-    tile_size: 8
+    tile_size: 4
+    # isaac_tag_bridge: [x, y, z, w] applied to every Isaac tag pose so its axes
+    # match apriltag_ros. Identity until a side-by-side check shows otherwise (README.md).
+    tag_rotation_correction: [0.0, 0.0, 0.0, 1.0]

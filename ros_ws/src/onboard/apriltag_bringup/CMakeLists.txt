@@ -7,9 +7,26 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+
+# isaac_tag_bridge: Isaac ROS AprilTag -> apriltag_ros-style /tf + /detections.
+# Only built where Isaac ROS is installed (the Jetson); the CPU launch files
+# are installed everywhere.
+find_package(isaac_ros_apriltag_interfaces QUIET)
+if(isaac_ros_apriltag_interfaces_FOUND)
+  find_package(rclcpp REQUIRED)
+  find_package(apriltag_msgs REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(tf2 REQUIRED)
+  find_package(tf2_ros REQUIRED)
+  add_executable(isaac_tag_bridge src/isaac_tag_bridge.cpp)
+  target_compile_features(isaac_tag_bridge PUBLIC cxx_std_17)
+  ament_target_dependencies(isaac_tag_bridge
+    rclcpp apriltag_msgs geometry_msgs tf2 tf2_ros isaac_ros_apriltag_interfaces)
+  install(TARGETS isaac_tag_bridge DESTINATION lib/${PROJECT_NAME})
+else()
+  message(WARNING "isaac_ros_apriltag_interfaces not found: skipping isaac_tag_bridge "
+                  "(only the CPU apriltag pipeline will work on this machine)")
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -24,5 +41,6 @@ if(BUILD_TESTING)
 endif()
 
 install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
+install(PROGRAMS scripts/compare_calibrations.py DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

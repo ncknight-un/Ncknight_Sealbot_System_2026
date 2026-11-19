@@ -22,6 +22,18 @@ public:
   {
     std::string camera_frame = "camera_optical_frame";
     get_parameter("camera_frame", camera_frame);
+    // Zero poses are only valid with the detector that produced them: Isaac and
+    // apriltag_ros can differ slightly in pose (and possibly tag-frame axes).
+    std::string calib_detector = "unknown", live_detector = "unknown";
+    get_parameter("detector", calib_detector);
+    get_parameter("live_detector", live_detector);
+    if (calib_detector != live_detector) {
+      RCLCPP_WARN(get_logger(),
+        "Calibration was recorded with the '%s' detector but the live detector is '%s'. "
+        "Re-run panel_calibration with detector:=%s for consistent zero frames.",
+        calib_detector.c_str(), live_detector.c_str(), live_detector.c_str());
+    }
+
     std::vector<std::string> tag_frames;
     if (!get_parameter("tag_frames", tag_frames) || tag_frames.empty()) {
       RCLCPP_ERROR(get_logger(), "No tag_frames found; pass the calibration file as a params file.");

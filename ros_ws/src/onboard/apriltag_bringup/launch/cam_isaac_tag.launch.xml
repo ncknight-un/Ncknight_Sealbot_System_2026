@@ -1,6 +1,8 @@
 <launch>
   <arg name="use_camera" default="true"/>
   <arg name="use_apriltag" default="true"/>
+  <!-- TF frame prefix for detected tags (tag_N, same as apriltag_ros/tags.yaml) -->
+  <arg name="tag_prefix" default="tag_"/>
 
   <!-- One shared container for camera + perception -->
   <node_container pkg="rclcpp_components" exec="component_container_mt"
@@ -41,14 +43,24 @@
       <param name="image_height" value="1076" />
     </composable_node>
 
-    <!-- Remap to camera topics and tag detections to detections to keep naming consistent with early testing -->
+    <!-- Isaac's own message type goes to /isaac/tag_detections; isaac_tag_bridge
+         below republishes it as apriltag_ros does (/detections + tag_N on /tf). -->
     <composable_node pkg="isaac_ros_apriltag"
                      plugin="nvidia::isaac_ros::apriltag::AprilTagNode" name="apriltag">
       <remap from="image" to="/camera/image_rect" />
       <remap from="camera_info" to="/camera/camera_info" />
-      <remap from="tag_detections" to="/detections" />
+      <remap from="tag_detections" to="/isaac/tag_detections" />
       <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
     </composable_node>
 
   </load_composable_node>
+
+  <!-- Isaac detections -> apriltag_ros-compatible /detections and /tf (tag_N) -->
+  <node pkg="apriltag_bringup" exec="isaac_tag_bridge" name="isaac_tag_bridge"
+        output="screen" if="$(var use_apriltag)">
+    <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
+    <param name="tag_prefix" value="$(var tag_prefix)" />
+    <remap from="detections_in" to="/isaac/tag_detections" />
+    <remap from="detections_out" to="/detections" />
+  </node>
 </launch>
