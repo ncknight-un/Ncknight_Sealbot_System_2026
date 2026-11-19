@@ -16,7 +16,7 @@
   <arg name="startup_timeout" default="30.0"/>
 
   <!-- GPU: camera + Isaac AprilTag + bridge (publishes tag_N on /tf) -->
-  <group if="$(eval '\'$(var detector)\' == \'isaac\'')">
+  <group if="$(eval '\'$(var detector)\I don't see that diff. ' == \'isaac\'')">
     <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
       <arg name="tag_prefix" value="$(var tag_prefix)"/>
     </include>

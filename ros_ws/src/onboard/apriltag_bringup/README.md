@@ -10,7 +10,7 @@ Two interchangeable AprilTag pipelines. Both publish the same outputs, so
 
 | detector | launch file | notes |
 |---|---|---|
-| `isaac` (default) | `cam_isaac_tag.launch.xml` | camera + rectify + GPU AprilTag in one container; `isaac_tag_bridge` converts Isaac's `/isaac/tag_detections` into the outputs above |
+| `isaac` (default) | `cam_isaac_tag.launch.xml` | camera + rectify + GPU AprilTag + `isaac_tag_bridge` in one container. Isaac only finds the tags; the bridge refines the corners on `/camera/image_rect_mono` and solves the pose with PnP like apriltag_ros, then publishes the outputs above |
 | `cpu` | `apriltag.launch.xml` | `apriltag_ros`, configured by `config/tags.yaml` |
 
 Pick it with `detector:=isaac|cpu` on `data_collection/panel_calibration.launch.xml`
@@ -37,8 +37,13 @@ ros2 launch data_collection panel_calibration.launch.xml detector:=isaac output_
 ros2 run apriltag_bringup compare_calibrations.py /tmp/zero_cpu.yaml /tmp/zero_isaac.yaml
 ```
 
-If it reports a consistent fixed rotation, copy the suggested quaternion into
-`tag_rotation_correction` in `config/isaac_tags.yaml`, rebuild, and re-run the
-Isaac calibration.
+If it reports a consistent fixed rotation, Isaac's corner order differs from
+apriltag's. Set in `config/isaac_tags.yaml`, rebuild, and compare again:
+
+- 90/180/270° about tag Z: `corner_shift: 1/2/3`
+- Z flipped (180° about X or Y): `corner_reverse: true` (maybe plus a shift)
+- small leftover rotation: `tag_rotation_correction`
+
+Then re-run the Isaac calibration.
 
 Keep `size` equal in `config/tags.yaml` and `config/isaac_tags.yaml`.

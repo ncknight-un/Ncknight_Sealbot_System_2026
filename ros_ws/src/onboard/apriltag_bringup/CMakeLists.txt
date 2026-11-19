@@ -8,27 +8,42 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 
-# isaac_tag_bridge: Isaac ROS AprilTag -> apriltag_ros-style /tf + /detections.
-# Only built where Isaac ROS is installed (the Jetson); the CPU launch files
-# are installed everywhere.
+# isaac_tag_bridge: Isaac ROS AprilTag -> apriltag_ros-style /tf + /detections,
+# with corner refinement + PnP. Built as a component (loaded into vision_container)
+# plus a standalone `isaac_tag_bridge` executable. Only built where Isaac ROS is
+# installed (the Jetson); the CPU launch files are installed everywhere.
 find_package(isaac_ros_apriltag_interfaces QUIET)
 if(isaac_ros_apriltag_interfaces_FOUND)
   find_package(rclcpp REQUIRED)
+  find_package(rclcpp_components REQUIRED)
+  find_package(sensor_msgs REQUIRED)
   find_package(apriltag_msgs REQUIRED)
   find_package(geometry_msgs REQUIRED)
   find_package(tf2 REQUIRED)
   find_package(tf2_ros REQUIRED)
-  add_executable(isaac_tag_bridge src/isaac_tag_bridge.cpp)
-  target_compile_features(isaac_tag_bridge PUBLIC cxx_std_17)
-  ament_target_dependencies(isaac_tag_bridge
-    rclcpp apriltag_msgs geometry_msgs tf2 tf2_ros)
+  find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d)
+
+  add_library(isaac_tag_bridge_component SHARED src/isaac_tag_bridge.cpp)
+  target_compile_features(isaac_tag_bridge_component PUBLIC cxx_std_17)
+  target_include_directories(isaac_tag_bridge_component SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+  ament_target_dependencies(isaac_tag_bridge_component
+    rclcpp rclcpp_components sensor_msgs apriltag_msgs geometry_msgs tf2 tf2_ros)
   # Link only the C++ message targets. ament_target_dependencies would also pull in
   # the prebuilt package's __rosidl_generator_py target, whose exported numpy
   # include path (/usr/local/.../numpy/core/include) doesn't exist on the Jetson.
-  target_link_libraries(isaac_tag_bridge
+  target_link_libraries(isaac_tag_bridge_component
+    ${OpenCV_LIBS}
     isaac_ros_apriltag_interfaces::isaac_ros_apriltag_interfaces__rosidl_generator_cpp
     isaac_ros_apriltag_interfaces::isaac_ros_apriltag_interfaces__rosidl_typesupport_cpp)
-  install(TARGETS isaac_tag_bridge DESTINATION lib/${PROJECT_NAME})
+
+  rclcpp_components_register_node(isaac_tag_bridge_component
+    PLUGIN "sealbot::IsaacTagBridge"
+    EXECUTABLE isaac_tag_bridge)
+
+  install(TARGETS isaac_tag_bridge_component
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)
 else()
   message(WARNING "isaac_ros_apriltag_interfaces not found: skipping isaac_tag_bridge "
                   "(only the CPU apriltag pipeline will work on this machine)")

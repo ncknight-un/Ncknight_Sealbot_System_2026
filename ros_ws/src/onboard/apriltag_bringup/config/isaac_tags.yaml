@@ -2,10 +2,18 @@
 # ignores the other's parameters. Keep `size` equal to config/tags.yaml (CPU).
 /**:
   ros__parameters:
-    # Isaac AprilTagNode
+    # Both: black-border edge length [m]
     size: 0.0085
-    max_tags: 24
-    tile_size: 4
-    # isaac_tag_bridge: [x, y, z, w] applied to every Isaac tag pose so its axes
-    # match apriltag_ros. Identity until a side-by-side check shows otherwise (README.md).
-    tag_rotation_correction: [0.0, 0.0, 0.0, 1.0]
+
+    # Isaac AprilTagNode
+    max_tags: 64
+    tile_size: 4          # 8 misses the small, tilted panel tags
+
+    # isaac_tag_bridge
+    # Same ids as tags.yaml; anything else Isaac reports is dropped (no hamming filter on GPU).
+    tag_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20]
+    refine_corners: true
+    # Only if a CPU-vs-Isaac comparison shows a constant rotation (see README.md):
+    corner_shift: 0       # 1/2/3 = 90/180/270 deg about tag Z
+    corner_reverse: false # tag Z flipped
+    tag_rotation_correction: [0.0, 0.0, 0.0, 1.0]  # small leftover [x, y, z, w]

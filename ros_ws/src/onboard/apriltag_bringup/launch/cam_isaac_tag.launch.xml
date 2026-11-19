@@ -53,14 +53,19 @@
       <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
     </composable_node>
 
+    <!-- Isaac detections -> apriltag_ros-compatible /detections and /tf (tag_N).
+         Re-solves each pose with refined corners + PnP on the rectified mono image. -->
+    <composable_node pkg="apriltag_bringup" plugin="sealbot::IsaacTagBridge" name="isaac_tag_bridge">
+      <remap from="detections_in" to="/isaac/tag_detections" />
+      <remap from="detections_out" to="/detections" />
+      <remap from="image" to="/camera/image_rect_mono" />
+      <remap from="camera_info" to="/camera/camera_info" />
+      <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
+      <param name="tag_prefix" value="$(var tag_prefix)" />
+      <param name="camera_frame" value="camera_optical_frame" />
+      <extra_arg name="use_intra_process_comms" value="true" />
+    </composable_node>
+
   </load_composable_node>
 
-  <!-- Isaac detections -> apriltag_ros-compatible /detections and /tf (tag_N) -->
-  <node pkg="apriltag_bringup" exec="isaac_tag_bridge" name="isaac_tag_bridge"
-        output="screen" if="$(var use_apriltag)">
-    <param from="$(find-pkg-share apriltag_bringup)/config/isaac_tags.yaml" />
-    <param name="tag_prefix" value="$(var tag_prefix)" />
-    <remap from="detections_in" to="/isaac/tag_detections" />
-    <remap from="detections_out" to="/detections" />
-  </node>
 </launch>

@@ -10,6 +10,9 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>sensor_msgs</depend>
+  <depend>libopencv-dev</depend>
   <depend>apriltag_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>tf2</depend>
@@ -18,7 +21,6 @@
 
   <exec_depend>apriltag_ros</exec_depend>
   <exec_depend>image_proc</exec_depend>
-  <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>camera_bringup</exec_depend>
   <exec_depend>isaac_ros_apriltag</exec_depend>
   <exec_depend>isaac_ros_image_proc</exec_depend>
