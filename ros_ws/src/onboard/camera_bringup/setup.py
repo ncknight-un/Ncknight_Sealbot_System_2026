@@ -13,7 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         # XML LAUNCH FILES:
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.xml') + glob('launch/*.py')),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.xml')),
         # XML and YAML CONFIG FILES:
         (os.path.join('share', package_name, 'config'), glob('config/*.xml') + glob('config/*.yaml')),
     ],

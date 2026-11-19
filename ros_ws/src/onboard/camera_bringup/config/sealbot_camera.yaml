@@ -1,18 +1,12 @@
-# Single source of truth for the Sealbot Vimba X camera. Loaded (via
-# camera_bringup.params) by both
-#   camera_bringup/launch/sealbot_camera.launch.py    (standalone node)
-#   apriltag_bringup/launch/cam_isaac_tag.launch.py   (composable node + GPU AprilTag)
-#
-# settings_file / camera_info_url may be bare filenames (resolved against
-# camera_bringup/config), absolute paths, or full file:// URLs.
-# The image size used by the GPU pipeline is read from the camera_info file, so
-# switching ROI only means changing the two filenames below (keep them matched).
+# Shared Vimba X camera parameters, loaded by both
+#   camera_bringup/launch/sealbot_camera.launch.xml      (standalone node)
+#   apriltag_bringup/launch/cam_isaac_tag.launch.xml     (composable node)
+# File paths (settings_file, camera_info_url) stay in the launch files because
+# they need $(find-pkg-share ...).
 /**:
   ros__parameters:
     camera_id: DEV_1AB22C0B5BB3
     camera_frame_id: camera_optical_frame
-    settings_file: cleanparams10_20_ROI.xml
-    camera_info_url: camera_info10_20_ROI.yaml
     # Stamp images with the camera's own capture time converted to ROS time
     # (needs the Sealbot patch to vimbax_camera; see sealbot_camera_time_sync.patch).
     # use_ros_time is the fallback (arrival time) until the clocks are synced.

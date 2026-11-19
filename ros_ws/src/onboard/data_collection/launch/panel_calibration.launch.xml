@@ -11,7 +11,7 @@
   <arg name="startup_timeout" default="30.0"/>
 
   <!-- Camera and detector -->
-  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.py"/>
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"/>
   <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml"/>
 
   <node pkg="data_collection" exec="panel_calibration" name="panel_calibration" output="screen"

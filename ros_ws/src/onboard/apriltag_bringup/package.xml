@@ -13,8 +13,6 @@
   <exec_depend>image_proc</exec_depend>
   <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>camera_bringup</exec_depend>
-  <exec_depend>launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
   <exec_depend>isaac_ros_apriltag</exec_depend>
   <exec_depend>isaac_ros_image_proc</exec_depend>
   <exec_depend>vimbax_camera</exec_depend>

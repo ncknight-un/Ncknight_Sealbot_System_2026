@@ -9,16 +9,20 @@
   <!-- Frames first, so TF is available when sensors start publishing -->
   <include file="$(find-pkg-share data_collection)/launch/vehicle_description.launch.xml"/>
 
-  <!-- Sensors (sonar + MAVROS); the camera runs in apriltag_bringup/cam_isaac_tag.launch.py -->
+  <!-- Sensors (sonar + MAVROS); the camera runs in apriltag_bringup/cam_isaac_tag.launch.xml -->
+  <!-- group scopes the include's args so use_camera:=false doesn't leak into the
+       cam_isaac_tag include below -->
+  <group>
   <include file="$(find-pkg-share data_collection)/launch/sensors.launch.xml">
     <arg name="use_camera" value="false"/>
     <arg name="use_sonar" value="$(var use_sonar)"/>
     <arg name="start_mavros" value="$(var start_mavros)"/>
     <arg name="fcu_url" value="$(var fcu_url)"/>
   </include>
+  </group>
 
   <!-- Camera + GPU perception in one container -->
-  <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.py">
+  <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
     <arg name="use_camera" value="$(var use_camera)"/>
     <arg name="use_apriltag" value="$(var use_apriltag)"/>
   </include>
