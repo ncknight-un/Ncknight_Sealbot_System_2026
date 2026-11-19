@@ -6,7 +6,7 @@
   <arg name="sonar_range" default="25" description="Ping360 max range [m]"/>
   <arg name="sonar_sector" default="10" description="Ping360 scanned sector [deg], centred on the sonar heading"/>
 
-  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_camera)"/>
+  <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.py" if="$(var use_camera)"/>
 
   <node pkg="ping360_sonar" exec="ping360_node" name="ping360_node" output="screen" if="$(var use_sonar)">
     <param name="frame" value="sonar"/>

@@ -3,11 +3,15 @@
 <package format="3">
   <name>camera_bringup</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Launch files and configuration for the Sealbot Allied Vision (Vimba X) camera.</description>
   <maintainer email="sealbot@todo.todo">sealbot</maintainer>
   <license>TODO: License declaration</license>
 
-  <depend>avt_vimba_camera</depend>
+  <exec_depend>vimbax_camera</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

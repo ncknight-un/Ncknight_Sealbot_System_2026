@@ -3,7 +3,7 @@
 <package format="3">
   <name>apriltag_bringup</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>AprilTag detection launch files: GPU (Isaac ROS) pipeline for live runs and CPU (apriltag_ros) pipeline for panel calibration.</description>
   <maintainer email="nolanknight2026@u.northwestern.edu">sealbot</maintainer>
   <license>TODO: License declaration</license>
 
@@ -13,6 +13,11 @@
   <exec_depend>image_proc</exec_depend>
   <exec_depend>rclcpp_components</exec_depend>
   <exec_depend>camera_bringup</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>isaac_ros_apriltag</exec_depend>
+  <exec_depend>isaac_ros_image_proc</exec_depend>
+  <exec_depend>vimbax_camera</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
