@@ -1,7 +1,8 @@
 <launch>
   <arg name="use_camera" default="true"/>
   <arg name="use_sonar" default="false"/>
-  <arg name="use_apriltag" default="true"/>
+  <!-- AprilTag detection is off by default; use_apriltag:=true to detect tags -->
+  <arg name="use_apriltag" default="false"/>
   <!-- cpu (apriltag_ros, default) or isaac (GPU, experimental). Use the same detector
        the panel calibration was recorded with; tag_zero_frames warns if they differ. -->
   <arg name="detector" default="cpu"/>

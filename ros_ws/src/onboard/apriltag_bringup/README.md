@@ -23,7 +23,7 @@ both**: the zero poses are only valid for the detector that recorded them, and
 ros2 launch data_collection panel_calibration.launch.xml                  # CPU (default)
 ros2 launch data_collection panel_calibration.launch.xml detector:=isaac  # experimental
 colcon build --packages-select data_collection                            # install the new zero file
-ros2 launch data_collection data_collection.launch.xml [detector:=isaac]
+ros2 launch data_collection data_collection.launch.xml use_apriltag:=true [detector:=isaac]   # detection is off by default
 ```
 
 ## Checking Isaac's tag axes against apriltag_ros (one-off)
