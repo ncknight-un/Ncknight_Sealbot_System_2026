@@ -10,19 +10,20 @@ Two interchangeable AprilTag pipelines. Both publish the same outputs, so
 
 | detector | launch file | notes |
 |---|---|---|
-| `isaac` (default) | `cam_isaac_tag.launch.xml` | camera + rectify + GPU AprilTag + `isaac_tag_bridge` in one container. Isaac only finds the tags; the bridge refines the corners on `/camera/image_rect_mono` and solves the pose with PnP like apriltag_ros, then publishes the outputs above |
-| `cpu` | `apriltag.launch.xml` | `apriltag_ros`, configured by `config/tags.yaml` |
+| `cpu` (default) | `apriltag.launch.xml` | `apriltag_ros`, configured by `config/tags.yaml` |
+| `isaac` (experimental) | `cam_isaac_tag.launch.xml use_apriltag:=true` | camera + rectify + GPU AprilTag + `isaac_tag_bridge` in one container. Isaac only finds the tags; the bridge refines the corners on `/camera/image_rect_mono` and solves the pose with PnP like apriltag_ros, then publishes the outputs above |
 
-Pick it with `detector:=isaac|cpu` on `data_collection/panel_calibration.launch.xml`
+Isaac (cuAprilTags) misses and mis-localises the small, tilted panel tags, so it is
+kept for experiments only. Pick it with `detector:=cpu|isaac` on `data_collection/panel_calibration.launch.xml`
 and `data_collection/data_collection.launch.xml`. **Use the same detector for
 both**: the zero poses are only valid for the detector that recorded them, and
 `tag_zero_frames` warns at startup if they differ.
 
 ```bash
-ros2 launch data_collection panel_calibration.launch.xml            # Isaac (GPU)
-ros2 launch data_collection panel_calibration.launch.xml detector:=cpu   # fallback
-colcon build --packages-select data_collection                       # install the new zero file
-ros2 launch data_collection data_collection.launch.xml [detector:=cpu]
+ros2 launch data_collection panel_calibration.launch.xml                  # CPU (default)
+ros2 launch data_collection panel_calibration.launch.xml detector:=isaac  # experimental
+colcon build --packages-select data_collection                            # install the new zero file
+ros2 launch data_collection data_collection.launch.xml [detector:=isaac]
 ```
 
 ## Checking Isaac's tag axes against apriltag_ros (one-off)

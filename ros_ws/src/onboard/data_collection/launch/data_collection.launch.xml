@@ -2,9 +2,9 @@
   <arg name="use_camera" default="true"/>
   <arg name="use_sonar" default="false"/>
   <arg name="use_apriltag" default="true"/>
-  <!-- isaac (GPU, default) or cpu (apriltag_ros). Use the same detector the
-       panel calibration was recorded with; tag_zero_frames warns if they differ. -->
-  <arg name="detector" default="isaac"/>
+  <!-- cpu (apriltag_ros, default) or isaac (GPU, experimental). Use the same detector
+       the panel calibration was recorded with; tag_zero_frames warns if they differ. -->
+  <arg name="detector" default="cpu"/>
   <arg name="use_tag_zero_frames" default="true"/>
   <arg name="start_mavros" default="true"/>
   <arg name="fcu_url" default="udp://0.0.0.0:14551@"/>
@@ -12,9 +12,9 @@
   <!-- Frames first, so TF is available when sensors start publishing -->
   <include file="$(find-pkg-share data_collection)/launch/vehicle_description.launch.xml"/>
 
-  <!-- Sensors (sonar + MAVROS); the camera runs in apriltag_bringup/cam_isaac_tag.launch.xml -->
+  <!-- Sensors (sonar + MAVROS); the camera is started with the detector below -->
   <!-- group scopes the include's args so use_camera:=false doesn't leak into the
-       cam_isaac_tag include below -->
+       includes below -->
   <group>
   <include file="$(find-pkg-share data_collection)/launch/sensors.launch.xml">
     <arg name="use_camera" value="false"/>
@@ -24,24 +24,18 @@
   </include>
   </group>
 
-  <!-- GPU: camera + Isaac AprilTag (+ bridge to /detections and tag_N TF) in one container -->
+  <!-- CPU (default): standalone camera + apriltag_ros, same as panel_calibration -->
+  <group if="$(eval '\'$(var detector)\' == \'cpu\'')">
+    <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml" if="$(var use_camera)"/>
+    <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml" if="$(var use_apriltag)"/>
+  </group>
+
+  <!-- Isaac (experimental): camera + Isaac AprilTag + bridge (/detections, tag_N TF) in one container -->
   <group if="$(eval '\'$(var detector)\' == \'isaac\'')">
     <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
       <arg name="use_camera" value="$(var use_camera)"/>
       <arg name="use_apriltag" value="$(var use_apriltag)"/>
     </include>
-  </group>
-
-  <!-- CPU fallback: same camera container, apriltag_ros instead of Isaac -->
-  <group if="$(eval '\'$(var detector)\' == \'cpu\'')">
-    <!-- inner group: keeps use_apriltag:=false from overwriting our use_apriltag below -->
-    <group>
-      <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
-        <arg name="use_camera" value="$(var use_camera)"/>
-        <arg name="use_apriltag" value="false"/>
-      </include>
-    </group>
-    <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml" if="$(var use_apriltag)"/>
   </group>
 
   <!-- Panel zero frames (camera_optical_frame -> tag_N_zero) from config/panel_zero.yaml;

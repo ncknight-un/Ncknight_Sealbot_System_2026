@@ -1,6 +1,9 @@
 <launch>
+  <!-- Camera in a component container, plus the experimental Isaac ROS (GPU)
+       AprilTag pipeline. Isaac detection is off by default: on its own this file
+       only runs the camera. The default detector is apriltag_ros (apriltag.launch.xml). -->
   <arg name="use_camera" default="true"/>
-  <arg name="use_apriltag" default="true"/>
+  <arg name="use_apriltag" default="false" description="Run Isaac AprilTag + isaac_tag_bridge"/>
   <!-- TF frame prefix for detected tags (tag_N, same as apriltag_ros/tags.yaml) -->
   <arg name="tag_prefix" default="tag_"/>
 

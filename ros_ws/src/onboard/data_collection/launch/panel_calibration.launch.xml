@@ -3,10 +3,10 @@
        `duration` seconds and write the zero poses to `output_file`. Keep the panel
        at rest. The whole launch shuts down once the calibration node exits.
 
-       detector:=isaac (default) uses the GPU pipeline from cam_isaac_tag.launch.xml.
-       detector:=cpu   falls back to apriltag_ros (apriltag.launch.xml).
+       detector:=cpu   (default) apriltag_ros (apriltag.launch.xml).
+       detector:=isaac experimental GPU pipeline (cam_isaac_tag.launch.xml).
        Use the same detector for data_collection.launch.xml as for calibration. -->
-  <arg name="detector" default="isaac" description="isaac (GPU) or cpu (apriltag_ros)"/>
+  <arg name="detector" default="cpu" description="cpu (apriltag_ros, default) or isaac (GPU, experimental)"/>
   <arg name="duration" default="5.0"/>
   <!-- Empty = data_collection/config/panel_zero.yaml in the source tree.
        Rebuild data_collection afterwards to install it for tag_zero_frames. -->
@@ -15,17 +15,18 @@
   <arg name="tag_prefix" default="tag_"/>
   <arg name="startup_timeout" default="30.0"/>
 
-  <!-- GPU: camera + Isaac AprilTag + bridge (publishes tag_N on /tf) -->
-  <group if="$(eval '\'$(var detector)\I don't see that diff. ' == \'isaac\'')">
-    <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
-      <arg name="tag_prefix" value="$(var tag_prefix)"/>
-    </include>
-  </group>
-
-  <!-- CPU fallback: standalone camera + apriltag_ros -->
+  <!-- CPU (default): standalone camera + apriltag_ros -->
   <group if="$(eval '\'$(var detector)\' == \'cpu\'')">
     <include file="$(find-pkg-share camera_bringup)/launch/sealbot_camera.launch.xml"/>
     <include file="$(find-pkg-share apriltag_bringup)/launch/apriltag.launch.xml"/>
+  </group>
+
+  <!-- Isaac (experimental): camera + Isaac AprilTag + bridge (publishes tag_N on /tf) -->
+  <group if="$(eval '\'$(var detector)\' == \'isaac\'')">
+    <include file="$(find-pkg-share apriltag_bringup)/launch/cam_isaac_tag.launch.xml">
+      <arg name="use_apriltag" value="true"/>
+      <arg name="tag_prefix" value="$(var tag_prefix)"/>
+    </include>
   </group>
 
   <node pkg="data_collection" exec="panel_calibration" name="panel_calibration" output="screen"

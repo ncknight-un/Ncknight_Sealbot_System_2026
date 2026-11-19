@@ -3,7 +3,7 @@
 <package format="3">
   <name>apriltag_bringup</name>
   <version>0.0.0</version>
-  <description>AprilTag detection launch files: GPU (Isaac ROS) pipeline for live runs and CPU (apriltag_ros) pipeline for panel calibration.</description>
+  <description>AprilTag detection launch files: CPU (apriltag_ros, default) pipeline and an experimental GPU (Isaac ROS) pipeline with isaac_tag_bridge.</description>
   <maintainer email="nolanknight2026@u.northwestern.edu">sealbot</maintainer>
   <license>TODO: License declaration</license>
 
