@@ -21,7 +21,13 @@ if(isaac_ros_apriltag_interfaces_FOUND)
   add_executable(isaac_tag_bridge src/isaac_tag_bridge.cpp)
   target_compile_features(isaac_tag_bridge PUBLIC cxx_std_17)
   ament_target_dependencies(isaac_tag_bridge
-    rclcpp apriltag_msgs geometry_msgs tf2 tf2_ros isaac_ros_apriltag_interfaces)
+    rclcpp apriltag_msgs geometry_msgs tf2 tf2_ros)
+  # Link only the C++ message targets. ament_target_dependencies would also pull in
+  # the prebuilt package's __rosidl_generator_py target, whose exported numpy
+  # include path (/usr/local/.../numpy/core/include) doesn't exist on the Jetson.
+  target_link_libraries(isaac_tag_bridge
+    isaac_ros_apriltag_interfaces::isaac_ros_apriltag_interfaces__rosidl_generator_cpp
+    isaac_ros_apriltag_interfaces::isaac_ros_apriltag_interfaces__rosidl_typesupport_cpp)
   install(TARGETS isaac_tag_bridge DESTINATION lib/${PROJECT_NAME})
 else()
   message(WARNING "isaac_ros_apriltag_interfaces not found: skipping isaac_tag_bridge "
