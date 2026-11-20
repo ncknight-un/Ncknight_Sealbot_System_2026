@@ -1,0 +1,42 @@
+Test: angle. Heads: angle_to_head
+Split of 46 recordings, seed 0:
+  label               train    val   test
+  angle_to_head -30       6      1      1
+  angle_to_head -60       6      1      1
+  angle_to_head 0         6      1      1
+  angle_to_head 30        6      1      1
+  angle_to_head 60        4      1      1
+  angle_to_head none      6      1      1
+  total                  34      6      6
+Split saved to results_data_11_17_1/diff_rotvec_split.json
+Inputs: 119 columns (119 tag, 0 IMU / extra), tags left out: [0, 7, 20]
+  angle_to_head classes: -60, -30, 0, 30, 60, none
+Checking the data:
+  train: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  train: angle_to_head by recording: -30 x6, -60 x6, 0 x6, 30 x6, 60 x4, none x6
+  val: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  val: angle_to_head by recording: -30 x1, -60 x1, 0 x1, 30 x1, 60 x1, none x1
+  test: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  test: angle_to_head by recording: -30 x1, -60 x1, 0 x1, 30 x1, 60 x1, none x1
+Segments of 1 frames (0.02 s), no overlap:
+  train  34 recordings ->  60333 segments (0 leftover rows dropped)
+  val     6 recordings ->  10909 segments (0 leftover rows dropped)
+  test    6 recordings ->  10927 segments (0 leftover rows dropped)
+  angle_to_head training segments: -60 13153, -30 10833, 0 8869, 30 9918, 60 7202, none 10358, unlabelled 0
+119 inputs -> 6 class outputs, model=lstm, hidden=128, layers=2, device=cuda
+Traceback (most recent call last):
+  File "/home/nolan-knight/Sealbot2.0/ML_Models/LSTM_flow_checks/train_lstm_flow.py", line 1057, in <module>
+    main()
+  File "/home/nolan-knight/Sealbot2.0/ML_Models/LSTM_flow_checks/train_lstm_flow.py", line 968, in main
+    tr = run_epoch(model, train_dl, device, heads, optimizer=optimizer, class_w=class_w, select=args.select,
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/nolan-knight/Sealbot2.0/ML_Models/LSTM_flow_checks/train_lstm_flow.py", line 685, in run_epoch
+    loss.backward()
+  File "/home/nolan-knight/bagsync-venv/lib/python3.12/site-packages/torch/_tensor.py", line 631, in backward
+    torch.autograd.backward(
+  File "/home/nolan-knight/bagsync-venv/lib/python3.12/site-packages/torch/autograd/__init__.py", line 381, in backward
+    _engine_run_backward(
+  File "/home/nolan-knight/bagsync-venv/lib/python3.12/site-packages/torch/autograd/graph.py", line 869, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

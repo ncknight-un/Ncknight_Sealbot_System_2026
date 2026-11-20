@@ -43,7 +43,7 @@
       <remap from="image" to="/camera/image_rect" />
       <param name="encoding_desired" value="rgb8" />
       <param name="image_width" value="1336" />
-      <param name="image_height" value="1076" />
+      <param name="image_height" value="1108" />
     </composable_node>
 
     <!-- Isaac's own message type goes to /isaac/tag_detections; isaac_tag_bridge

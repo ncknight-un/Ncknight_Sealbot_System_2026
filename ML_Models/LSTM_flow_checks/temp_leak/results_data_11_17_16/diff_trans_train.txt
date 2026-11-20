@@ -1,0 +1,145 @@
+Test: angle. Heads: angle_to_head
+Split of 46 recordings, seed 0:
+  label               train    val   test
+  angle_to_head -30       6      1      1
+  angle_to_head -60       6      1      1
+  angle_to_head 0         6      1      1
+  angle_to_head 30        6      1      1
+  angle_to_head 60        4      1      1
+  angle_to_head none      6      1      1
+  total                  34      6      6
+Split saved to results_data_11_17_16/diff_trans_split.json
+Inputs: 68 columns (68 tag, 0 IMU / extra), tags left out: [0, 7, 20]
+  angle_to_head classes: -60, -30, 0, 30, 60, none
+Checking the data:
+  train: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  train: angle_to_head by recording: -30 x6, -60 x6, 0 x6, 30 x6, 60 x4, none x6
+  val: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  val: angle_to_head by recording: -30 x1, -60 x1, 0 x1, 30 x1, 60 x1, none x1
+  test: tags missed in 0.00% of rows overall (held at the last detection or zero pose; seen flag = 0).
+  test: angle_to_head by recording: -30 x1, -60 x1, 0 x1, 30 x1, 60 x1, none x1
+Segments of 16 frames (0.25 s), no overlap:
+  train  34 recordings ->   3757 segments (221 leftover rows dropped)
+  val     6 recordings ->    680 segments (29 leftover rows dropped)
+  test    6 recordings ->    680 segments (47 leftover rows dropped)
+  angle_to_head training segments: -60 820, -30 674, 0 552, 30 617, 60 449, none 645, unlabelled 0
+68 inputs -> 6 class outputs, model=lstm, hidden=128, layers=2, device=cuda
+epoch   1/80  train angle_to_head CE 1.5395 acc 32.4% bal 30.4%  val angle_to_head CE 1.1299 acc 45.1% bal 43.6%  *saved
+epoch   2/80  train angle_to_head CE 1.0051 acc 55.3% bal 54.6%  val angle_to_head CE 0.7342 acc 63.5% bal 60.6%  *saved
+epoch   3/80  train angle_to_head CE 0.7754 acc 64.4% bal 63.7%  val angle_to_head CE 0.7350 acc 66.0% bal 62.6%  *saved
+epoch   4/80  train angle_to_head CE 0.6360 acc 71.8% bal 71.1%  val angle_to_head CE 0.6051 acc 74.3% bal 71.8%  *saved
+epoch   5/80  train angle_to_head CE 0.5265 acc 77.7% bal 76.9%  val angle_to_head CE 0.5970 acc 73.7% bal 71.6%
+epoch   6/80  train angle_to_head CE 0.4519 acc 81.2% bal 80.4%  val angle_to_head CE 0.5220 acc 80.6% bal 80.0%  *saved
+epoch   7/80  train angle_to_head CE 0.4113 acc 82.7% bal 82.1%  val angle_to_head CE 0.4832 acc 79.7% bal 78.0%
+epoch   8/80  train angle_to_head CE 0.3664 acc 84.5% bal 84.0%  val angle_to_head CE 0.4671 acc 78.4% bal 76.9%
+epoch   9/80  train angle_to_head CE 0.3345 acc 87.0% bal 86.6%  val angle_to_head CE 0.4282 acc 83.4% bal 82.6%  *saved
+epoch  10/80  train angle_to_head CE 0.2747 acc 89.3% bal 89.0%  val angle_to_head CE 0.4640 acc 81.9% bal 81.3%
+epoch  11/80  train angle_to_head CE 0.2760 acc 88.8% bal 88.5%  val angle_to_head CE 0.4588 acc 83.5% bal 82.8%  *saved
+epoch  12/80  train angle_to_head CE 0.2261 acc 91.3% bal 91.1%  val angle_to_head CE 0.6091 acc 78.7% bal 77.2%
+epoch  13/80  train angle_to_head CE 0.2090 acc 92.1% bal 91.8%  val angle_to_head CE 0.5910 acc 81.0% bal 79.9%
+epoch  14/80  train angle_to_head CE 0.1818 acc 93.3% bal 93.2%  val angle_to_head CE 0.5681 acc 83.1% bal 81.5%
+epoch  15/80  train angle_to_head CE 0.1591 acc 94.0% bal 93.8%  val angle_to_head CE 0.5178 acc 84.7% bal 83.7%  *saved
+epoch  16/80  train angle_to_head CE 0.1506 acc 94.3% bal 94.1%  val angle_to_head CE 0.5128 acc 84.3% bal 83.6%
+epoch  17/80  train angle_to_head CE 0.1310 acc 95.2% bal 95.0%  val angle_to_head CE 0.6491 acc 80.4% bal 79.1%
+epoch  18/80  train angle_to_head CE 0.1178 acc 95.6% bal 95.4%  val angle_to_head CE 0.4812 acc 85.7% bal 85.4%  *saved
+epoch  19/80  train angle_to_head CE 0.1186 acc 95.9% bal 95.8%  val angle_to_head CE 0.6228 acc 82.5% bal 81.5%
+epoch  20/80  train angle_to_head CE 0.0944 acc 96.8% bal 96.6%  val angle_to_head CE 0.5812 acc 84.9% bal 84.3%
+epoch  21/80  train angle_to_head CE 0.0967 acc 96.6% bal 96.5%  val angle_to_head CE 0.5738 acc 84.7% bal 83.8%
+epoch  22/80  train angle_to_head CE 0.0905 acc 97.0% bal 96.9%  val angle_to_head CE 0.7576 acc 81.8% bal 80.6%
+epoch  23/80  train angle_to_head CE 0.0848 acc 97.4% bal 97.3%  val angle_to_head CE 0.8498 acc 79.7% bal 78.3%
+epoch  24/80  train angle_to_head CE 0.1049 acc 96.6% bal 96.5%  val angle_to_head CE 0.6366 acc 83.8% bal 82.3%
+epoch  25/80  train angle_to_head CE 0.0757 acc 97.2% bal 97.2%  val angle_to_head CE 0.6073 acc 85.0% bal 84.1%
+epoch  26/80  train angle_to_head CE 0.0938 acc 96.8% bal 96.8%  val angle_to_head CE 0.6307 acc 82.9% bal 81.7%
+epoch  27/80  train angle_to_head CE 0.0725 acc 97.7% bal 97.6%  val angle_to_head CE 0.6149 acc 82.8% bal 82.9%
+epoch  28/80  train angle_to_head CE 0.0645 acc 97.7% bal 97.7%  val angle_to_head CE 0.6589 acc 84.9% bal 83.5%
+epoch  29/80  train angle_to_head CE 0.0605 acc 98.2% bal 98.2%  val angle_to_head CE 0.5801 acc 86.2% bal 85.6%  *saved
+epoch  30/80  train angle_to_head CE 0.0555 acc 98.3% bal 98.2%  val angle_to_head CE 0.5794 acc 86.3% bal 85.5%
+epoch  31/80  train angle_to_head CE 0.0616 acc 98.0% bal 98.0%  val angle_to_head CE 0.6339 acc 85.4% bal 84.7%
+epoch  32/80  train angle_to_head CE 0.0577 acc 98.3% bal 98.2%  val angle_to_head CE 0.6216 acc 85.4% bal 84.7%
+epoch  33/80  train angle_to_head CE 0.0416 acc 98.7% bal 98.7%  val angle_to_head CE 0.8246 acc 83.5% bal 81.9%
+epoch  34/80  train angle_to_head CE 0.0537 acc 98.1% bal 98.1%  val angle_to_head CE 0.7394 acc 83.2% bal 81.8%
+epoch  35/80  train angle_to_head CE 0.0461 acc 98.5% bal 98.5%  val angle_to_head CE 0.7944 acc 83.8% bal 83.0%
+epoch  36/80  train angle_to_head CE 0.0303 acc 99.0% bal 99.0%  val angle_to_head CE 0.7742 acc 85.6% bal 84.5%
+epoch  37/80  train angle_to_head CE 0.0444 acc 98.6% bal 98.6%  val angle_to_head CE 0.8213 acc 85.4% bal 84.7%
+epoch  38/80  train angle_to_head CE 0.0421 acc 98.7% bal 98.7%  val angle_to_head CE 0.6768 acc 86.6% bal 85.9%  *saved
+epoch  39/80  train angle_to_head CE 0.0364 acc 99.0% bal 99.0%  val angle_to_head CE 0.7173 acc 84.7% bal 83.8%
+epoch  40/80  train angle_to_head CE 0.0415 acc 98.7% bal 98.7%  val angle_to_head CE 0.6521 acc 85.3% bal 84.3%
+epoch  41/80  train angle_to_head CE 0.0337 acc 99.0% bal 99.0%  val angle_to_head CE 0.7256 acc 85.1% bal 84.0%
+epoch  42/80  train angle_to_head CE 0.0367 acc 98.8% bal 98.8%  val angle_to_head CE 0.7608 acc 84.4% bal 83.8%
+epoch  43/80  train angle_to_head CE 0.0379 acc 98.8% bal 98.8%  val angle_to_head CE 0.6116 acc 85.0% bal 84.1%
+epoch  44/80  train angle_to_head CE 0.0329 acc 99.0% bal 98.9%  val angle_to_head CE 0.6523 acc 86.3% bal 85.8%
+epoch  45/80  train angle_to_head CE 0.0364 acc 98.8% bal 98.8%  val angle_to_head CE 0.7054 acc 86.8% bal 86.6%  *saved
+epoch  46/80  train angle_to_head CE 0.0327 acc 99.1% bal 99.1%  val angle_to_head CE 0.7834 acc 85.6% bal 84.7%
+epoch  47/80  train angle_to_head CE 0.0453 acc 98.7% bal 98.7%  val angle_to_head CE 0.7737 acc 85.9% bal 85.2%
+epoch  48/80  train angle_to_head CE 0.0358 acc 98.9% bal 98.9%  val angle_to_head CE 0.9196 acc 82.9% bal 82.0%
+epoch  49/80  train angle_to_head CE 0.0419 acc 98.8% bal 98.8%  val angle_to_head CE 0.5416 acc 87.4% bal 86.3%
+epoch  50/80  train angle_to_head CE 0.0450 acc 98.6% bal 98.6%  val angle_to_head CE 0.8026 acc 84.7% bal 83.4%
+epoch  51/80  train angle_to_head CE 0.0304 acc 99.0% bal 99.0%  val angle_to_head CE 0.7177 acc 85.4% bal 84.4%
+epoch  52/80  train angle_to_head CE 0.0340 acc 98.9% bal 98.9%  val angle_to_head CE 0.7391 acc 85.7% bal 84.8%
+epoch  53/80  train angle_to_head CE 0.0321 acc 99.0% bal 99.0%  val angle_to_head CE 0.8569 acc 84.4% bal 83.2%
+epoch  54/80  train angle_to_head CE 0.0323 acc 98.9% bal 98.9%  val angle_to_head CE 0.8202 acc 84.6% bal 83.4%
+epoch  55/80  train angle_to_head CE 0.0336 acc 99.1% bal 99.1%  val angle_to_head CE 0.8174 acc 83.8% bal 82.7%
+epoch  56/80  train angle_to_head CE 0.0280 acc 99.1% bal 99.0%  val angle_to_head CE 0.7729 acc 84.3% bal 83.7%
+epoch  57/80  train angle_to_head CE 0.0425 acc 98.7% bal 98.7%  val angle_to_head CE 0.6775 acc 85.0% bal 84.0%
+epoch  58/80  train angle_to_head CE 0.0248 acc 99.3% bal 99.3%  val angle_to_head CE 0.9267 acc 83.8% bal 82.4%
+epoch  59/80  train angle_to_head CE 0.0276 acc 99.2% bal 99.2%  val angle_to_head CE 0.7240 acc 86.0% bal 85.1%
+epoch  60/80  train angle_to_head CE 0.0269 acc 99.3% bal 99.3%  val angle_to_head CE 0.6884 acc 85.4% bal 84.6%
+Stopping early: val hasn't improved for 15 epochs (best: epoch 45)
+
+Final scores of the saved model (epoch 45):
+  train angle_to_head CE 0.0008 acc 100.0% bal 100.0%
+        angle_to_head baseline (always '-60'): 21.8%
+  val   angle_to_head CE 0.7054 acc 86.8% bal 86.6%
+        angle_to_head baseline (always '-60'): 21.2%
+
+angle_to_head confusion matrix (val) (rows = true, columns = predicted, counted per segment):
+                   -60       -30         0        30        60      none    recall
+  -60              141         3         0         0         0         0     97.9%
+  -30                7        80         0         0         0         0     92.0%
+  0                  0         0        78         1         0        16     82.1%
+  30                 0         0        31        82         0         0     72.6%
+  60                 0         0         0         0       112         0    100.0%
+  none               2         1        25         4         0        97     75.2%
+  test  angle_to_head CE 0.7472 acc 85.0% bal 82.2%
+        angle_to_head baseline (always '-60'): 22.4%
+
+angle_to_head confusion matrix (test) (rows = true, columns = predicted, counted per segment):
+                   -60       -30         0        30        60      none    recall
+  -60              147         5         0         0         0         0     96.7%
+  -30                8        88         0         0         3         0     88.9%
+  0                  0         1        57        12         1         4     76.0%
+  30                 1         0        21        43         1        13     54.4%
+  60                 0         1         0         3       129         0     97.0%
+  none               2         0        25         1         0       114     80.3%
+
+Per recording (train, only those below 90%; worst first):  none
+
+Per recording (val; worst first):
+  sub5_30deg_5p5slab_11_17_2026_Tagged_3.42-31.35s_tag_imu_to_flow_class.csv
+      angle_to_head: 30  72.6% of 113 segments (else mostly 0), vote -> 30
+  sub4_nm_11_17_2026_Tagged_0.78-32.53s_tag_imu_to_flow_class.csv
+      angle_to_head: none  75.2% of 129 segments (else mostly 0), vote -> none
+  sub5_0deg_5p5slab_11_17_2026_Tagged_5.64-29.10s_tag_imu_to_flow_class.csv
+      angle_to_head: 0  82.1% of 95 segments (else mostly none), vote -> 0
+  sub7_n30deg_5p5slab_11_17_2026_Tagged_3.62-25.06s_tag_imu_to_flow_class.csv
+      angle_to_head: -30  92.0% of 87 segments (else mostly -60), vote -> -30
+  sub8_n60deg_5p5slab_11_17_2026_Tagged_5.43-41.02s_tag_imu_to_flow_class.csv
+      angle_to_head: -60  97.9% of 144 segments (else mostly -30), vote -> -60
+  sub1_60deg_5p5slab_11_17_2026_Tagged_11.22-38.91s_tag_imu_to_flow_class.csv
+      angle_to_head: 60 100.0% of 112 segments, vote -> 60
+
+Per recording (test; worst first):
+  sub3_30deg_5p5slab_11_17_2026_Tagged_1.66-21.20s_tag_imu_to_flow_class.csv
+      angle_to_head: 30  54.4% of 79 segments (else mostly 0), vote -> 30
+  sub6_0deg_5p5slab_11_17_2026_Tagged_3.79-22.47s_tag_imu_to_flow_class.csv
+      angle_to_head: 0  76.0% of 75 segments (else mostly 30), vote -> 0
+  sub2_nm_11_17_2026_Tagged_1.33-36.48s_tag_imu_to_flow_class.csv
+      angle_to_head: none  80.3% of 142 segments (else mostly 0), vote -> none
+  sub1_n30deg_5p5slab_11_17_2026_Tagged_11.59-36.04s_tag_imu_to_flow_class.csv
+      angle_to_head: -30  88.9% of 99 segments (else mostly -60), vote -> -30
+  sub4_n60deg_5p5slab_11_17_2026_Tagged_2.24-39.73s_tag_imu_to_flow_class.csv
+      angle_to_head: -60  96.7% of 152 segments (else mostly -30), vote -> -60
+  sub6_60deg_5p5slab_11_17_2026_Tagged_5.25-38.05s_tag_imu_to_flow_class.csv
+      angle_to_head: 60  97.0% of 133 segments (else mostly 30), vote -> 60
+
+Curve saved to results_data_11_17_16/diff_trans_curve.png

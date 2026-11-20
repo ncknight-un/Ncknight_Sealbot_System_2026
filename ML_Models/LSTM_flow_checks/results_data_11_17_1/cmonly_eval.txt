@@ -1,0 +1,51 @@
+Model: results_data_11_17_1/cmonly.pt  (segments of 1 frames = 0.02 s, no overlap; inputs: tags; angle test)
+
+=== val (6 recordings) ===
+
+  angle_to_head: accuracy 26.6%, balanced 24.7%   (baseline: always '-60' = 21.2%, balanced 16.7%)
+                   -60       -30         0        30        60      none    recall   (rows = true, columns = predicted, per segment)
+  -60             1156       379        50       171        73       483     50.0%
+  -30              435       358        41       153        65       341     25.7%
+  0                453       237        77       200        69       489      5.0%
+  30               604       364        35       236        49       527     13.0%
+  60               507       298        52       217       305       421     16.9%
+  none             617       340        40       229        63       775     37.5%
+
+  Per recording (worst first):
+    sub5_0deg_5p5slab_11_17_2026_Tagged_5.64-29.10s_tag_imu_to_flow_class
+        angle_to_head: 0   5.0% of 1525 segments, vote -> -60
+    sub5_30deg_5p5slab_11_17_2026_Tagged_3.42-31.35s_tag_imu_to_flow_class
+        angle_to_head: 30  13.0% of 1815 segments, vote -> -60
+    sub1_60deg_5p5slab_11_17_2026_Tagged_11.22-38.91s_tag_imu_to_flow_class
+        angle_to_head: 60  16.9% of 1800 segments, vote -> -60
+    sub7_n30deg_5p5slab_11_17_2026_Tagged_3.62-25.06s_tag_imu_to_flow_class
+        angle_to_head: -30  25.7% of 1393 segments, vote -> -60
+    sub4_nm_11_17_2026_Tagged_0.78-32.53s_tag_imu_to_flow_class
+        angle_to_head: none  37.5% of 2064 segments, vote -> -60
+    sub8_n60deg_5p5slab_11_17_2026_Tagged_5.43-41.02s_tag_imu_to_flow_class
+        angle_to_head: -60  50.0% of 2312 segments, vote -> -60
+
+=== test (6 recordings) ===
+
+  angle_to_head: accuracy 26.3%, balanced 23.1%   (baseline: always '-60' = 22.3%, balanced 16.7%)
+                   -60       -30         0        30        60      none    recall   (rows = true, columns = predicted, per segment)
+  -60             1107       454        54       172       107       543     45.4%
+  -30              512       373        30       158        60       456     23.5%
+  0                422       224        53       149        47       320      4.4%
+  30               379       199        37       170        34       451     13.4%
+  60               644       345        62       208       322       551     15.1%
+  none             738       348        47       237        66       848     37.1%
+
+  Per recording (worst first):
+    sub6_0deg_5p5slab_11_17_2026_Tagged_3.79-22.47s_tag_imu_to_flow_class
+        angle_to_head: 0   4.4% of 1215 segments, vote -> -60
+    sub3_30deg_5p5slab_11_17_2026_Tagged_1.66-21.20s_tag_imu_to_flow_class
+        angle_to_head: 30  13.4% of 1270 segments, vote -> -60
+    sub6_60deg_5p5slab_11_17_2026_Tagged_5.25-38.05s_tag_imu_to_flow_class
+        angle_to_head: 60  15.1% of 2132 segments, vote -> -60
+    sub1_n30deg_5p5slab_11_17_2026_Tagged_11.59-36.04s_tag_imu_to_flow_class
+        angle_to_head: -30  23.5% of 1589 segments, vote -> -60
+    sub2_nm_11_17_2026_Tagged_1.33-36.48s_tag_imu_to_flow_class
+        angle_to_head: none  37.1% of 2284 segments, vote -> -60
+    sub4_n60deg_5p5slab_11_17_2026_Tagged_2.24-39.73s_tag_imu_to_flow_class
+        angle_to_head: -60  45.4% of 2437 segments, vote -> -60

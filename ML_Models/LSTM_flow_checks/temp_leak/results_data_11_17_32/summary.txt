@@ -1,0 +1,11 @@
+Data: data_11_17 (46 recordings), 32-frame windows, tags dropped: 0,7,20
+
+model           val (acc / balanced)         test (acc / balanced)       
+diff_whiskers   95.6% / 95.5%                95.9% / 95.1%               
+cmdiff          93.5% / 93.5%                94.1% / 92.6%               
+cmonly          79.6% / 79.3%                79.9% / 77.3%               
+
+resting position: Whisker tag/axis pairs with F > 10: 43 of 54   (median F 29.3)
+resting position: Reference tag max F: 190.8   (large = the camera or rig moved between angles)
+jitter:           Whisker tag/axis pairs with F > 10: 12 of 54   (median F 3.0)
+jitter:           Reference tag max F: 8.9   (large = the camera or rig moved between angles)

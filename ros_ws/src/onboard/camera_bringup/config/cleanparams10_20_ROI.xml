@@ -990,7 +990,7 @@
                 <Feature Name="Gain" Value="15" Type="Float" />
             </SelectorGroup>
             <Feature Name="GainSelector" Value="All" Type="Enum" />
-            <Feature Name="Height" Value="1076" Type="Int" />
+            <Feature Name="Height" Value="1108" Type="Int" />
             <Feature Name="HeightMax" Value="1472" Type="Int" />
             <Feature Name="IntensityAutoPrecedence" Value="MinimizeNoise" Type="Enum" />
             <Feature Name="IntensityControllerRate" Value="100" Type="Int" />
@@ -5613,7 +5613,7 @@
             <Feature Name="MultipleRegionArrangement" Value="Free" Type="Enum" />
             <Feature Name="MultipleRegionEnable" Value="0" Type="Bool" />
             <Feature Name="OffsetX" Value="224" Type="Int" />
-            <Feature Name="OffsetY" Value="232" Type="Int" />
+            <Feature Name="OffsetY" Value="216" Type="Int" />
             <Feature Name="PayloadSize" Value="1437536" Type="Int" />
             <Feature Name="PixelFormat" Value="Mono8" Type="Enum" />
             <Feature Name="PixelSize" Value="Bpp8" Type="Enum" />
